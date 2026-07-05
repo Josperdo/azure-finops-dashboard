@@ -1,0 +1,35 @@
+# Local-only planning docs (not for public repo)
+CLAUDE.md
+tasks/lessons.md
+tasks/todo.md
+ROADMAP.md
+SECURITY.md
+
+# Secrets / local config
+.env
+.env.*
+*.local.json
+config.local.*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Exported reports (may contain real subscription/cost data)
+exports/
+output/
+
+# Editor/OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
