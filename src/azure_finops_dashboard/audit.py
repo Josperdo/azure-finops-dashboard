@@ -1,0 +1,143 @@
+from dataclasses import dataclass
+
+from rich.table import Table
+
+SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
+
+
+@dataclass
+class ResourceInfo:
+    resource_id: str
+    name: str
+    resource_group: str
+    resource_type: str
+    tags: dict[str, str]
+
+
+@dataclass
+class VmInfo:
+    resource_id: str
+    name: str
+    resource_group: str
+    power_state: str
+
+
+@dataclass
+class DiskInfo:
+    resource_id: str
+    name: str
+    resource_group: str
+    managed_by: str | None
+    disk_size_gb: int
+
+
+@dataclass
+class PublicIpInfo:
+    resource_id: str
+    name: str
+    resource_group: str
+    ip_configuration_id: str | None
+
+
+@dataclass
+class Finding:
+    resource_id: str
+    resource_name: str
+    resource_group: str
+    resource_type: str
+    issue: str
+    severity: str  # "high" | "medium" | "low"
+
+
+def find_untagged_resources(resources: list[ResourceInfo]) -> list[Finding]:
+    return [
+        Finding(
+            resource_id=r.resource_id,
+            resource_name=r.name,
+            resource_group=r.resource_group,
+            resource_type=r.resource_type,
+            issue="No tags applied",
+            severity="low",
+        )
+        for r in resources
+        if not r.tags
+    ]
+
+
+def find_idle_vms(vms: list[VmInfo]) -> list[Finding]:
+    findings = []
+    for vm in vms:
+        if vm.power_state == "PowerState/stopped":
+            findings.append(
+                Finding(
+                    resource_id=vm.resource_id,
+                    resource_name=vm.name,
+                    resource_group=vm.resource_group,
+                    resource_type="virtual_machine",
+                    issue="VM is stopped but not deallocated — still billed for compute",
+                    severity="high",
+                )
+            )
+        elif vm.power_state == "PowerState/deallocated":
+            findings.append(
+                Finding(
+                    resource_id=vm.resource_id,
+                    resource_name=vm.name,
+                    resource_group=vm.resource_group,
+                    resource_type="virtual_machine",
+                    issue="VM is deallocated — no compute charge, but check attached disks/IPs",
+                    severity="low",
+                )
+            )
+    return findings
+
+
+def find_unattached_disks(disks: list[DiskInfo]) -> list[Finding]:
+    return [
+        Finding(
+            resource_id=d.resource_id,
+            resource_name=d.name,
+            resource_group=d.resource_group,
+            resource_type="managed_disk",
+            issue=f"Unattached managed disk ({d.disk_size_gb} GB) — incurring storage cost",
+            severity="medium",
+        )
+        for d in disks
+        if d.managed_by is None
+    ]
+
+
+def find_orphaned_public_ips(ips: list[PublicIpInfo]) -> list[Finding]:
+    return [
+        Finding(
+            resource_id=ip.resource_id,
+            resource_name=ip.name,
+            resource_group=ip.resource_group,
+            resource_type="public_ip",
+            issue="Public IP not associated with any resource — incurring cost while unused",
+            severity="medium",
+        )
+        for ip in ips
+        if ip.ip_configuration_id is None
+    ]
+
+
+def render_audit_report(findings: list[Finding]) -> Table:
+    """Render findings as a Rich table, most severe first."""
+    ordered = sorted(findings, key=lambda f: SEVERITY_ORDER.get(f.severity, 99))
+
+    table = Table(title="FinOps Audit Findings")
+    table.add_column("Severity")
+    table.add_column("Type")
+    table.add_column("Resource Group")
+    table.add_column("Name")
+    table.add_column("Issue")
+    for finding in ordered:
+        table.add_row(
+            finding.severity,
+            finding.resource_type,
+            finding.resource_group,
+            finding.resource_name,
+            finding.issue,
+        )
+    return table

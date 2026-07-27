@@ -1,9 +1,11 @@
+from pathlib import Path
+
 import typer
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from azure_finops_dashboard import __version__, auth, config, cost, subscriptions
+from azure_finops_dashboard import __version__, auth, config, cost, export, subscriptions
 from azure_finops_dashboard.errors import friendly_error
 
 app = typer.Typer(
@@ -68,6 +70,9 @@ def cost_summary(
         "mtd", "--timeframe", help="Time period to summarize: 'mtd' or 'last-month'."
     ),
     top: int = typer.Option(10, "--top", help="Number of services/resource groups to show."),
+    output: Path | None = typer.Option(
+        None, "--output", help="Also write the summary to a file (.csv, .json, or .pdf)."
+    ),
 ) -> None:
     """Show month-to-date (or last-month) spend by service and resource group."""
     if timeframe not in cost.TIMEFRAMES:
@@ -89,6 +94,7 @@ def cost_summary(
         console.print(f"[red]Error:[/red] {friendly_error(exc)}")
         raise typer.Exit(1) from exc
 
+    summaries: list[cost.CostSummary] = []
     for subscription_id in subscription_ids:
         label = names_by_id.get(subscription_id, subscription_id)
         try:
@@ -102,6 +108,7 @@ def cost_summary(
         except Exception as exc:  # noqa: BLE001 - translated into a friendly message below
             console.print(f"[red]Error ({label}):[/red] {friendly_error(exc)}")
             continue
+        summaries.append(summary)
 
         headline = f"[bold]{summary.total_cost:,.2f} {summary.currency}[/bold]"
         console.print(Panel(headline, title=label))
@@ -119,6 +126,14 @@ def cost_summary(
         for name, amount in summary.by_resource_group:
             rg_table.add_row(name, f"{amount:,.2f}")
         console.print(rg_table)
+
+    if output is not None and summaries:
+        try:
+            export.export_cost_summaries(summaries, output)
+        except Exception as exc:  # noqa: BLE001 - translated into a friendly message below
+            console.print(f"[red]Error:[/red] {friendly_error(exc)}")
+            raise typer.Exit(1) from exc
+        console.print(f"Wrote summary to [bold]{output}[/bold]")
 
 
 def main() -> None:

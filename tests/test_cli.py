@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from azure.core.exceptions import ClientAuthenticationError
 from pytest_mock import MockerFixture
 from typer.testing import CliRunner
@@ -79,6 +81,36 @@ def test_cost_summary(mocker: MockerFixture) -> None:
     assert "142.5" in result.stdout
     assert "Compute" in result.stdout
     assert "rg-a" in result.stdout
+
+
+def test_cost_summary_with_output(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch("azure_finops_dashboard.cli.auth.get_credential")
+    mocker.patch("azure_finops_dashboard.cli.config.load_config", return_value=Config())
+    mocker.patch(
+        "azure_finops_dashboard.cli.subscriptions.list_subscriptions",
+        return_value=[
+            SubscriptionInfo(subscription_id="sub-1", display_name="Sub One", state="Enabled")
+        ],
+    )
+    mocker.patch(
+        "azure_finops_dashboard.cli.cost.get_cost_summary",
+        return_value=CostSummary(
+            subscription_id="sub-1",
+            currency="USD",
+            total_cost=142.5,
+            by_service=[("Compute", 100.0)],
+            by_resource_group=[("rg-a", 100.0)],
+        ),
+    )
+    output_path = tmp_path / "summary.csv"
+
+    result = runner.invoke(
+        app, ["cost", "summary", "--all-subscriptions", "--output", str(output_path)]
+    )
+
+    assert result.exit_code == 0
+    assert output_path.exists()
+    assert "Wrote summary" in result.stdout
 
 
 def test_cost_summary_no_subscription_specified(mocker: MockerFixture) -> None:

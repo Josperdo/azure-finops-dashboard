@@ -4,6 +4,7 @@ tasks/lessons.md
 tasks/todo.md
 ROADMAP.md
 SECURITY.md
+Notes.md
 
 # Secrets / local config
 .env
