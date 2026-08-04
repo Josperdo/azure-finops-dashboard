@@ -1,5 +1,6 @@
 [build-system]
-requires = ["setuptools>=68"]
+# >=83.0.0: 79.0.1 has a known CVE (PYSEC-2026-3447), caught by CI's pip-audit step.
+requires = ["setuptools>=83.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]

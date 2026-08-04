@@ -13,6 +13,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      # actions/setup-python bundles its own baseline pip/setuptools, which can be an old,
+      # vulnerable version independent of anything this project declares - pip-audit scans
+      # the actual environment, not just our own dependency list, so upgrade it explicitly
+      # rather than relying on pyproject.toml's [build-system] requires (which only governs
+      # an isolated build sandbox, not this persistent environment). Confirmed by reproducing
+      # the CVE locally with an unupgraded pip/setuptools and clearing it with this exact fix.
+      - run: pip install --upgrade pip setuptools
       - run: pip install -e ".[dev]"
       - run: ruff check .
       - run: mypy src
