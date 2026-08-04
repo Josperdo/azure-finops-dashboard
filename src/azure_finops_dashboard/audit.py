@@ -127,11 +127,15 @@ def render_audit_report(findings: list[Finding]) -> Table:
     ordered = sorted(findings, key=lambda f: SEVERITY_ORDER.get(f.severity, 99))
 
     table = Table(title="FinOps Audit Findings")
-    table.add_column("Severity")
-    table.add_column("Type")
-    table.add_column("Resource Group")
-    table.add_column("Name")
-    table.add_column("Issue")
+    # overflow="fold" wraps long cell text instead of truncating with Rich's default
+    # Unicode ellipsis character, which isn't cp1252-safe and renders as mojibake on
+    # Windows terminals stuck on a legacy console - confirmed live, same root cause as
+    # the rich.bar.Bar crash fixed earlier (trend.py's _ascii_bar).
+    table.add_column("Severity", overflow="fold")
+    table.add_column("Type", overflow="fold")
+    table.add_column("Resource Group", overflow="fold")
+    table.add_column("Name", overflow="fold")
+    table.add_column("Issue", overflow="fold")
     for finding in ordered:
         table.add_row(
             finding.severity,

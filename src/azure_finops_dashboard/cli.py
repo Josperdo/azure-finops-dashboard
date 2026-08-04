@@ -10,6 +10,8 @@ from rich.table import Table
 
 from azure_finops_dashboard import (
     __version__,
+    audit,
+    audit_queries,
     auth,
     budgets,
     config,
@@ -31,6 +33,8 @@ cost_app = typer.Typer(help="Azure spend summaries.")
 app.add_typer(cost_app, name="cost")
 budget_app = typer.Typer(help="Azure budget status.")
 app.add_typer(budget_app, name="budget")
+audit_app = typer.Typer(help="FinOps audit findings.")
+app.add_typer(audit_app, name="audit")
 console = Console()
 
 
@@ -322,6 +326,64 @@ def dashboard(
                 console.print("No budgets configured for this subscription.")
         except Exception as exc:  # noqa: BLE001 - translated into a friendly message below
             console.print(f"[red]Error ({label}, budgets):[/red] {friendly_error(exc)}")
+
+
+@audit_app.command("run")
+def audit_run(
+    subscription: list[str] = typer.Option(
+        [], "--subscription", help="Subscription ID to query (repeatable)."
+    ),
+    all_subscriptions: bool = typer.Option(
+        False, "--all-subscriptions", help="Query every subscription visible to this identity."
+    ),
+) -> None:
+    """Scan for untagged resources, idle VMs, unattached disks, and orphaned public IPs."""
+    try:
+        credential, names_by_id, subscription_ids = _resolve_credential_and_subscriptions(
+            subscription, all_subscriptions
+        )
+    except Exception as exc:  # noqa: BLE001 - translated into a friendly message below
+        console.print(f"[red]Error:[/red] {friendly_error(exc)}")
+        raise typer.Exit(1) from exc
+
+    for subscription_id in subscription_ids:
+        label = names_by_id.get(subscription_id, subscription_id)
+        console.rule(f"[bold cyan]{label}[/bold cyan]")
+
+        findings = []
+
+        try:
+            with console.status(f"Scanning resources for {label}..."):
+                resources = audit_queries.fetch_resources(credential, subscription_id)
+            findings += audit.find_untagged_resources(resources)
+        except Exception as exc:  # noqa: BLE001 - translated into a friendly message below
+            console.print(f"[red]Error ({label}, resources):[/red] {friendly_error(exc)}")
+
+        try:
+            with console.status(f"Scanning VMs for {label}..."):
+                vms = audit_queries.fetch_vms(credential, subscription_id)
+            findings += audit.find_idle_vms(vms)
+        except Exception as exc:  # noqa: BLE001 - translated into a friendly message below
+            console.print(f"[red]Error ({label}, VMs):[/red] {friendly_error(exc)}")
+
+        try:
+            with console.status(f"Scanning disks for {label}..."):
+                disks = audit_queries.fetch_disks(credential, subscription_id)
+            findings += audit.find_unattached_disks(disks)
+        except Exception as exc:  # noqa: BLE001 - translated into a friendly message below
+            console.print(f"[red]Error ({label}, disks):[/red] {friendly_error(exc)}")
+
+        try:
+            with console.status(f"Scanning public IPs for {label}..."):
+                ips = audit_queries.fetch_public_ips(credential, subscription_id)
+            findings += audit.find_orphaned_public_ips(ips)
+        except Exception as exc:  # noqa: BLE001 - translated into a friendly message below
+            console.print(f"[red]Error ({label}, public IPs):[/red] {friendly_error(exc)}")
+
+        if findings:
+            console.print(audit.render_audit_report(findings))
+        else:
+            console.print("No findings.")
 
 
 def main() -> None:

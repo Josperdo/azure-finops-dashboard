@@ -5,6 +5,7 @@ from pytest_mock import MockerFixture
 from typer.testing import CliRunner
 
 from azure_finops_dashboard import __version__
+from azure_finops_dashboard.audit import ResourceInfo, VmInfo
 from azure_finops_dashboard.budgets import BudgetStatus
 from azure_finops_dashboard.cli import app
 from azure_finops_dashboard.config import Config
@@ -424,4 +425,83 @@ def test_dashboard_isolates_section_failures(mocker: MockerFixture) -> None:
     assert "Compute" in result.stdout  # cost summary still printed
     assert "az login" in result.stdout  # trend's friendly error
     assert "No budgets configured" in result.stdout  # budgets still printed
+    assert "Traceback" not in result.stdout
+
+
+def test_audit_run_combines_findings_from_all_detectors(mocker: MockerFixture) -> None:
+    mocker.patch("azure_finops_dashboard.cli.auth.get_credential")
+    mocker.patch("azure_finops_dashboard.cli.config.load_config", return_value=Config())
+    mocker.patch(
+        "azure_finops_dashboard.cli.subscriptions.list_subscriptions",
+        return_value=[
+            SubscriptionInfo(subscription_id="sub-1", display_name="Sub One", state="Enabled")
+        ],
+    )
+    mocker.patch(
+        "azure_finops_dashboard.cli.audit_queries.fetch_resources",
+        return_value=[
+            ResourceInfo("id-1", "res-1", "rg-a", "storage_account", tags={}),
+        ],
+    )
+    mocker.patch(
+        "azure_finops_dashboard.cli.audit_queries.fetch_vms",
+        return_value=[VmInfo("id-2", "vm-1", "rg-a", "PowerState/stopped")],
+    )
+    mocker.patch("azure_finops_dashboard.cli.audit_queries.fetch_disks", return_value=[])
+    mocker.patch("azure_finops_dashboard.cli.audit_queries.fetch_public_ips", return_value=[])
+
+    result = runner.invoke(app, ["audit", "run", "--all-subscriptions"])
+
+    assert result.exit_code == 0
+    assert "Sub One" in result.stdout
+    assert "res-1" in result.stdout  # untagged resource finding
+    assert "vm-1" in result.stdout  # idle VM finding
+    assert "high" in result.stdout  # idle VM finding's severity
+
+
+def test_audit_run_no_findings(mocker: MockerFixture) -> None:
+    mocker.patch("azure_finops_dashboard.cli.auth.get_credential")
+    mocker.patch("azure_finops_dashboard.cli.config.load_config", return_value=Config())
+    mocker.patch(
+        "azure_finops_dashboard.cli.subscriptions.list_subscriptions",
+        return_value=[
+            SubscriptionInfo(subscription_id="sub-1", display_name="Sub One", state="Enabled")
+        ],
+    )
+    mocker.patch("azure_finops_dashboard.cli.audit_queries.fetch_resources", return_value=[])
+    mocker.patch("azure_finops_dashboard.cli.audit_queries.fetch_vms", return_value=[])
+    mocker.patch("azure_finops_dashboard.cli.audit_queries.fetch_disks", return_value=[])
+    mocker.patch("azure_finops_dashboard.cli.audit_queries.fetch_public_ips", return_value=[])
+
+    result = runner.invoke(app, ["audit", "run", "--all-subscriptions"])
+
+    assert result.exit_code == 0
+    assert "No findings" in result.stdout
+
+
+def test_audit_run_isolates_category_failures(mocker: MockerFixture) -> None:
+    mocker.patch("azure_finops_dashboard.cli.auth.get_credential")
+    mocker.patch("azure_finops_dashboard.cli.config.load_config", return_value=Config())
+    mocker.patch(
+        "azure_finops_dashboard.cli.subscriptions.list_subscriptions",
+        return_value=[
+            SubscriptionInfo(subscription_id="sub-1", display_name="Sub One", state="Enabled")
+        ],
+    )
+    mocker.patch(
+        "azure_finops_dashboard.cli.audit_queries.fetch_resources",
+        side_effect=ClientAuthenticationError("no token"),
+    )
+    mocker.patch(
+        "azure_finops_dashboard.cli.audit_queries.fetch_vms",
+        return_value=[VmInfo("id-2", "vm-1", "rg-a", "PowerState/stopped")],
+    )
+    mocker.patch("azure_finops_dashboard.cli.audit_queries.fetch_disks", return_value=[])
+    mocker.patch("azure_finops_dashboard.cli.audit_queries.fetch_public_ips", return_value=[])
+
+    result = runner.invoke(app, ["audit", "run", "--all-subscriptions"])
+
+    assert result.exit_code == 0
+    assert "az login" in result.stdout  # resources' friendly error
+    assert "vm-1" in result.stdout  # VMs still contributed a finding
     assert "Traceback" not in result.stdout
