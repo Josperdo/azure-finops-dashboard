@@ -75,9 +75,13 @@ def test_render_audit_report_orders_by_severity() -> None:
     ]
 
     table = render_audit_report(findings)
+    # Severity cells carry Rich color markup (e.g. "[red]high[/red]"), so check the word
+    # is present rather than an exact match.
     severity_column = [str(cell) for cell in table.columns[0].cells]
     name_column = [str(cell) for cell in table.columns[3].cells]
 
     assert table.row_count == 3
-    assert severity_column == ["high", "medium", "low"]
+    assert "high" in severity_column[0]
+    assert "medium" in severity_column[1]
+    assert "low" in severity_column[2]
     assert name_column == ["res-high", "res-medium", "res-low"]

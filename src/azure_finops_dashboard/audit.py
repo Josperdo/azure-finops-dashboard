@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from rich.table import Table
 
 SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
+SEVERITY_STYLE = {"high": "red", "medium": "yellow", "low": "dim"}
 
 
 @dataclass
@@ -126,7 +127,7 @@ def render_audit_report(findings: list[Finding]) -> Table:
     """Render findings as a Rich table, most severe first."""
     ordered = sorted(findings, key=lambda f: SEVERITY_ORDER.get(f.severity, 99))
 
-    table = Table(title="FinOps Audit Findings")
+    table = Table(title="FinOps Audit Findings", header_style="bold cyan")
     # overflow="fold" wraps long cell text instead of truncating with Rich's default
     # Unicode ellipsis character, which isn't cp1252-safe and renders as mojibake on
     # Windows terminals stuck on a legacy console - confirmed live, same root cause as
@@ -137,8 +138,10 @@ def render_audit_report(findings: list[Finding]) -> Table:
     table.add_column("Name", overflow="fold")
     table.add_column("Issue", overflow="fold")
     for finding in ordered:
+        style = SEVERITY_STYLE.get(finding.severity, "")
+        severity_cell = f"[{style}]{finding.severity}[/{style}]" if style else finding.severity
         table.add_row(
-            finding.severity,
+            severity_cell,
             finding.resource_type,
             finding.resource_group,
             finding.resource_name,

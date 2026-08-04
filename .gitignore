@@ -24,6 +24,8 @@ dist/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+htmlcov/
 
 # Exported reports (may contain real subscription/cost data)
 exports/

@@ -115,7 +115,7 @@ def _ascii_bar(value: float, max_value: float, width: int = 20) -> str:
 
 
 def render_trend(trend: TrendSummary) -> Table:
-    table = Table(title="Spend Trend")
+    table = Table(title="Spend Trend", header_style="bold cyan")
     table.add_column("Month")
     table.add_column("Cost", justify="right")
     table.add_column("Change")

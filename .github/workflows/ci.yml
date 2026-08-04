@@ -17,3 +17,4 @@ jobs:
       - run: ruff check .
       - run: mypy src
       - run: pytest
+      - run: pip-audit

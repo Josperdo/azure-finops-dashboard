@@ -18,6 +18,9 @@ classifiers = [
 ]
 dependencies = [
     "azure-identity>=1.17",
+    # Transitive via azure-identity/msal, pinned explicitly: 49.0.0 has a known CVE
+    # (PYSEC-2026-3552), caught by wiring pip-audit into CI.
+    "cryptography>=50.0.0",
     "azure-mgmt-costmanagement>=4.0",
     "azure-mgmt-consumption>=10.0",
     "azure-mgmt-subscription>=3.1",

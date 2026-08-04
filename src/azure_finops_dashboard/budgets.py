@@ -72,7 +72,7 @@ def list_budget_statuses(credential: TokenCredential, subscription_id: str) -> l
 
 
 def render_budget_status(statuses: list[BudgetStatus]) -> Table:
-    table = Table(title="Budget Status")
+    table = Table(title="Budget Status", header_style="bold cyan")
     table.add_column("Budget")
     table.add_column("Time Grain")
     table.add_column("Spend", justify="right")

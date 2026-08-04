@@ -89,14 +89,20 @@ def test_fetch_vms_extracts_power_state(mocker: MockerFixture) -> None:
         name="vm-2",
         instance_view=None,
     )
+    vm_missing_id = SimpleNamespace(id=None, name="vm-3", instance_view=None)
     mock_client = MagicMock()
-    mock_client.virtual_machines.list_all.return_value = [vm_running, vm_no_instance_view]
+    mock_client.virtual_machines.list_all.return_value = [
+        vm_running,
+        vm_no_instance_view,
+        vm_missing_id,
+    ]
     mocker.patch(
         "azure_finops_dashboard.audit_queries.ComputeManagementClient", return_value=mock_client
     )
 
     vms = fetch_vms(credential=MagicMock(), subscription_id=SUB_ID)
 
+    assert len(vms) == 2  # vm_missing_id skipped - malformed SDK data, no usable ID
     assert vms[0].power_state == "PowerState/running"
     assert vms[0].resource_group == "rg-a"
     assert vms[1].power_state == ""
@@ -110,15 +116,16 @@ def test_fetch_disks_maps_fields(mocker: MockerFixture) -> None:
         managed_by=None,
         disk_size_gb=64,
     )
+    disk_missing_name = SimpleNamespace(id="id-x", name=None, managed_by=None, disk_size_gb=1)
     mock_client = MagicMock()
-    mock_client.disks.list.return_value = [disk]
+    mock_client.disks.list.return_value = [disk, disk_missing_name]
     mocker.patch(
         "azure_finops_dashboard.audit_queries.ComputeManagementClient", return_value=mock_client
     )
 
     disks = fetch_disks(credential=MagicMock(), subscription_id=SUB_ID)
 
-    assert disks == [
+    assert disks == [  # disk_missing_name skipped - malformed SDK data, no usable name
         DiskInfo(
             resource_id=disk.id,
             name="disk-1",
@@ -140,13 +147,19 @@ def test_fetch_public_ips_maps_ip_configuration(mocker: MockerFixture) -> None:
         name="ip-2",
         ip_configuration=None,
     )
+    ip_missing_id = SimpleNamespace(id=None, name="ip-3", ip_configuration=None)
     mock_client = MagicMock()
-    mock_client.public_ip_addresses.list_all.return_value = [attached_ip, orphaned_ip]
+    mock_client.public_ip_addresses.list_all.return_value = [
+        attached_ip,
+        orphaned_ip,
+        ip_missing_id,
+    ]
     mocker.patch(
         "azure_finops_dashboard.audit_queries.NetworkManagementClient", return_value=mock_client
     )
 
     ips = fetch_public_ips(credential=MagicMock(), subscription_id=SUB_ID)
 
+    assert len(ips) == 2  # ip_missing_id skipped - malformed SDK data, no usable ID
     assert ips[0].ip_configuration_id == "config-1"
     assert ips[1].ip_configuration_id is None

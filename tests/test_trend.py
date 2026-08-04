@@ -2,10 +2,11 @@ import datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
 from pytest_mock import MockerFixture
 
 from azure_finops_dashboard.client_config import CLIENT_KWARGS
-from azure_finops_dashboard.trend import get_trend
+from azure_finops_dashboard.trend import _billing_month_key, get_trend
 
 
 def _fake_result(rows: list[list[object]]) -> SimpleNamespace:
@@ -73,6 +74,16 @@ def test_get_trend_delta_handles_zero_prior_month(mocker: MockerFixture) -> None
     assert summary.deltas[0] is None  # first month has no prior month
     assert summary.deltas[1] == -100.0  # 100 -> 0
     assert summary.deltas[2] is None  # prior month (0) would divide by zero
+
+
+def test_billing_month_key_rejects_non_string() -> None:
+    with pytest.raises(TypeError, match="Expected a billing month string"):
+        _billing_month_key(20240301)
+
+
+def test_billing_month_key_rejects_too_short_string() -> None:
+    with pytest.raises(TypeError, match="Expected a billing month string"):
+        _billing_month_key("2024")
 
 
 def test_get_trend_uses_tuned_client_kwargs(mocker: MockerFixture) -> None:

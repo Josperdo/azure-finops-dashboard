@@ -56,16 +56,16 @@ def _resolve_credential_and_subscriptions(
 
 def _print_cost_summary(label: str, summary: cost.CostSummary) -> None:
     headline = f"[bold]{summary.total_cost:,.2f} {summary.currency}[/bold]"
-    console.print(Panel(headline, title=label))
+    console.print(Panel(headline, title=label, border_style="cyan"))
 
-    service_table = Table(title="Top Services")
+    service_table = Table(title="Top Services", header_style="bold cyan")
     service_table.add_column("Service")
     service_table.add_column("Cost", justify="right")
     for name, amount in summary.by_service:
         service_table.add_row(name, f"{amount:,.2f}")
     console.print(service_table)
 
-    rg_table = Table(title="Top Resource Groups")
+    rg_table = Table(title="Top Resource Groups", header_style="bold cyan")
     rg_table.add_column("Resource Group")
     rg_table.add_column("Cost", justify="right")
     for name, amount in summary.by_resource_group:
@@ -73,7 +73,7 @@ def _print_cost_summary(label: str, summary: cost.CostSummary) -> None:
     console.print(rg_table)
 
     if summary.by_tag:
-        tag_table = Table(title="Top by Tag")
+        tag_table = Table(title="Top by Tag", header_style="bold cyan")
         tag_table.add_column("Tag Value")
         tag_table.add_column("Cost", justify="right")
         for name, amount in summary.by_tag:
@@ -110,7 +110,7 @@ def subscriptions_list() -> None:
         console.print(f"[red]Error:[/red] {friendly_error(exc)}")
         raise typer.Exit(1) from exc
 
-    table = Table()
+    table = Table(header_style="bold cyan")
     table.add_column("Subscription ID")
     table.add_column("Name")
     table.add_column("State")
@@ -239,7 +239,7 @@ def cost_trend(
         except Exception as exc:  # noqa: BLE001 - translated into a friendly message below
             console.print(f"[red]Error ({label}):[/red] {friendly_error(exc)}")
             continue
-        console.print(Panel(f"[bold]{label}[/bold]"))
+        console.print(Panel(f"[bold]{label}[/bold]", border_style="cyan"))
         console.print(trend.render_trend(summary))
 
 
@@ -269,7 +269,7 @@ def budget_status(
         except Exception as exc:  # noqa: BLE001 - translated into a friendly message below
             console.print(f"[red]Error ({label}):[/red] {friendly_error(exc)}")
             continue
-        console.print(Panel(f"[bold]{label}[/bold]"))
+        console.print(Panel(f"[bold]{label}[/bold]", border_style="cyan"))
         if not statuses:
             console.print("No budgets configured for this subscription.")
             continue
