@@ -13,6 +13,7 @@ class ResourceInfo:
     resource_group: str
     resource_type: str
     tags: dict[str, str]
+    location: str = ""
 
 
 @dataclass
@@ -21,6 +22,7 @@ class VmInfo:
     name: str
     resource_group: str
     power_state: str
+    location: str = ""
 
 
 @dataclass
@@ -30,6 +32,7 @@ class DiskInfo:
     resource_group: str
     managed_by: str | None
     disk_size_gb: int
+    location: str = ""
 
 
 @dataclass
@@ -38,6 +41,7 @@ class PublicIpInfo:
     name: str
     resource_group: str
     ip_configuration_id: str | None
+    location: str = ""
 
 
 @dataclass
@@ -48,6 +52,7 @@ class Finding:
     resource_type: str
     issue: str
     severity: str  # "high" | "medium" | "low"
+    subscription_id: str = ""
 
 
 def find_untagged_resources(resources: list[ResourceInfo]) -> list[Finding]:

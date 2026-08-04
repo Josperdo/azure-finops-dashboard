@@ -57,6 +57,7 @@ def test_list_budget_statuses_handles_zero_amount(mocker: MockerFixture) -> None
             time_grain="Monthly",
             percent_used=0.0,
             status="ok",
+            subscription_id="sub-1",
         )
     ]
 

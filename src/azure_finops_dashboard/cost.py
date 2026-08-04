@@ -18,10 +18,11 @@ TIMEFRAMES = {"mtd": "MonthToDate", "last-month": "TheLastMonth"}
 
 # Cost Management is reported to throttle around 4 calls per scope per minute
 # (https://learn.microsoft.com/en-us/answers/questions/1520105/) - get_cost_summary makes
-# 3-4 sequential calls itself, and firing them with zero pacing risks tripping that ceiling
-# even with a dedicated ClientType quota pool (confirmed: a single-call query succeeded live
-# while this function's 4-call burst still got a 429, immediately after the ClientType fix
-# was added). This doesn't guarantee avoiding it, just makes a burst less likely to trip it.
+# 3+ sequential calls itself (more with multiple tag keys), and firing them with zero
+# pacing risks tripping that ceiling even with a dedicated ClientType quota pool (confirmed:
+# a single-call query succeeded live while this function's 4-call burst still got a 429,
+# immediately after the ClientType fix was added). This doesn't guarantee avoiding it, just
+# makes a burst less likely to trip it.
 _CALL_PACING_SECONDS = 2.0
 
 
@@ -32,7 +33,7 @@ class CostSummary:
     total_cost: float
     by_service: list[tuple[str, float]] = field(default_factory=list)
     by_resource_group: list[tuple[str, float]] = field(default_factory=list)
-    by_tag: list[tuple[str, float]] = field(default_factory=list)
+    by_tag: dict[str, list[tuple[str, float]]] = field(default_factory=dict)
 
 
 def _query(
@@ -71,23 +72,29 @@ def _rows_to_pairs(
     return sorted(pairs, key=lambda p: p[1], reverse=True)
 
 
+def _merge_pairs(pair_lists: list[list[tuple[str, float]]], top_n: int) -> list[tuple[str, float]]:
+    totals: dict[str, float] = {}
+    for pairs in pair_lists:
+        for name, amount in pairs:
+            totals[name] = totals.get(name, 0.0) + amount
+    return sorted(totals.items(), key=lambda p: p[1], reverse=True)[:top_n]
+
+
 def rollup_cost_summaries(summaries: list[CostSummary], top_n: int = 10) -> CostSummary:
     """Combine multiple subscriptions' summaries into one merged view."""
-
-    def _merge(pair_lists: list[list[tuple[str, float]]]) -> list[tuple[str, float]]:
-        totals: dict[str, float] = {}
-        for pairs in pair_lists:
-            for name, amount in pairs:
-                totals[name] = totals.get(name, 0.0) + amount
-        return sorted(totals.items(), key=lambda p: p[1], reverse=True)[:top_n]
+    all_tag_keys = {key for s in summaries for key in s.by_tag}
+    merged_by_tag = {
+        key: _merge_pairs([s.by_tag.get(key, []) for s in summaries], top_n)
+        for key in all_tag_keys
+    }
 
     return CostSummary(
         subscription_id="(all)",
         currency=summaries[0].currency if summaries else "",
         total_cost=sum(s.total_cost for s in summaries),
-        by_service=_merge([s.by_service for s in summaries]),
-        by_resource_group=_merge([s.by_resource_group for s in summaries]),
-        by_tag=_merge([s.by_tag for s in summaries]),
+        by_service=_merge_pairs([s.by_service for s in summaries], top_n),
+        by_resource_group=_merge_pairs([s.by_resource_group for s in summaries], top_n),
+        by_tag=merged_by_tag,
     )
 
 
@@ -96,7 +103,7 @@ def get_cost_summary(
     subscription_id: str,
     timeframe: str = "MonthToDate",
     top_n: int = 10,
-    tag_key: str | None = None,
+    tag_keys: list[str] | None = None,
     time_period: QueryTimePeriod | None = None,
 ) -> CostSummary:
     """Fetch a cost summary for one subscription.
@@ -135,8 +142,8 @@ def get_cost_summary(
     )
     by_resource_group = _rows_to_pairs(rg_columns, rg_rows, "ResourceGroupName")[:top_n]
 
-    by_tag: list[tuple[str, float]] = []
-    if tag_key:
+    by_tag: dict[str, list[tuple[str, float]]] = {}
+    for tag_key in tag_keys or []:
         time.sleep(_CALL_PACING_SECONDS)
         tag_columns, tag_rows = _query(
             client,
@@ -147,7 +154,7 @@ def get_cost_summary(
         )
         # TagKey groupings return fixed generic column names (TagKey/TagValue), not a
         # column named after the tag key itself - confirmed live, an assumption otherwise.
-        by_tag = _rows_to_pairs(tag_columns, tag_rows, "TagValue")[:top_n]
+        by_tag[tag_key] = _rows_to_pairs(tag_columns, tag_rows, "TagValue")[:top_n]
 
     return CostSummary(
         subscription_id=subscription_id,

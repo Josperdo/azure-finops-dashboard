@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from azure.core.exceptions import ClientAuthenticationError
@@ -116,6 +117,74 @@ def test_cost_summary_with_output(mocker: MockerFixture, tmp_path: Path) -> None
     assert "Wrote summary" in result.stdout
 
 
+def test_cost_summary_multi_format_output(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch("azure_finops_dashboard.cli.auth.get_credential")
+    mocker.patch("azure_finops_dashboard.cli.config.load_config", return_value=Config())
+    mocker.patch(
+        "azure_finops_dashboard.cli.subscriptions.list_subscriptions",
+        return_value=[
+            SubscriptionInfo(subscription_id="sub-1", display_name="Sub One", state="Enabled")
+        ],
+    )
+    mocker.patch(
+        "azure_finops_dashboard.cli.cost.get_cost_summary",
+        return_value=CostSummary(
+            subscription_id="sub-1",
+            currency="USD",
+            total_cost=142.5,
+            by_service=[("Compute", 100.0)],
+        ),
+    )
+    csv_path = tmp_path / "summary.csv"
+    json_path = tmp_path / "summary.json"
+    pdf_path = tmp_path / "summary.pdf"
+
+    result = runner.invoke(
+        app,
+        [
+            "cost",
+            "summary",
+            "--all-subscriptions",
+            "--output",
+            str(csv_path),
+            "--output",
+            str(json_path),
+            "--output",
+            str(pdf_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert csv_path.exists()
+    assert json_path.exists()
+    assert pdf_path.exists()
+    assert result.stdout.count("Wrote summary") == 3
+
+
+def test_cost_summary_output_unsupported_extension(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch("azure_finops_dashboard.cli.auth.get_credential")
+    mocker.patch("azure_finops_dashboard.cli.config.load_config", return_value=Config())
+    mocker.patch(
+        "azure_finops_dashboard.cli.subscriptions.list_subscriptions",
+        return_value=[
+            SubscriptionInfo(subscription_id="sub-1", display_name="Sub One", state="Enabled")
+        ],
+    )
+    mocker.patch(
+        "azure_finops_dashboard.cli.cost.get_cost_summary",
+        return_value=CostSummary(subscription_id="sub-1", currency="USD", total_cost=142.5),
+    )
+    bad_path = tmp_path / "summary.txt"
+
+    result = runner.invoke(
+        app, ["cost", "summary", "--all-subscriptions", "--output", str(bad_path)]
+    )
+
+    assert result.exit_code == 1
+    assert "Unsupported export format" in result.stdout
+    assert "Traceback" not in result.stdout
+
+
 def test_cost_summary_with_tag_key(mocker: MockerFixture) -> None:
     mocker.patch("azure_finops_dashboard.cli.auth.get_credential")
     mocker.patch("azure_finops_dashboard.cli.config.load_config", return_value=Config())
@@ -133,7 +202,7 @@ def test_cost_summary_with_tag_key(mocker: MockerFixture) -> None:
             total_cost=142.5,
             by_service=[("Compute", 100.0)],
             by_resource_group=[("rg-a", 100.0)],
-            by_tag=[("prod", 100.0)],
+            by_tag={"Environment": [("prod", 100.0)]},
         ),
     )
 
@@ -143,7 +212,7 @@ def test_cost_summary_with_tag_key(mocker: MockerFixture) -> None:
 
     assert result.exit_code == 0
     assert "prod" in result.stdout
-    assert get_summary.call_args.kwargs["tag_key"] == "Environment"
+    assert get_summary.call_args.kwargs["tag_keys"] == ["Environment"]
 
 
 def test_cost_summary_start_end_must_be_paired() -> None:
@@ -154,9 +223,7 @@ def test_cost_summary_start_end_must_be_paired() -> None:
 
 
 def test_cost_summary_malformed_date() -> None:
-    result = runner.invoke(
-        app, ["cost", "summary", "--start", "not-a-date", "--end", "2024-01-31"]
-    )
+    result = runner.invoke(app, ["cost", "summary", "--start", "not-a-date", "--end", "2024-01-31"])
 
     assert result.exit_code == 1
     assert "YYYY-MM-DD" in result.stdout
@@ -292,6 +359,46 @@ def test_cost_trend(mocker: MockerFixture) -> None:
     assert "2024-02" in result.stdout
 
 
+def test_cost_trend_with_output(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch("azure_finops_dashboard.cli.auth.get_credential")
+    mocker.patch("azure_finops_dashboard.cli.config.load_config", return_value=Config())
+    mocker.patch(
+        "azure_finops_dashboard.cli.subscriptions.list_subscriptions",
+        return_value=[
+            SubscriptionInfo(subscription_id="sub-1", display_name="Sub One", state="Enabled")
+        ],
+    )
+    mocker.patch(
+        "azure_finops_dashboard.cli.trend.get_trend",
+        return_value=TrendSummary(
+            subscription_id="sub-1",
+            currency="USD",
+            months=[TrendMonth(month="2024-01", cost=100.0)],
+            deltas=[None],
+        ),
+    )
+    csv_path = tmp_path / "trend.csv"
+    json_path = tmp_path / "trend.json"
+
+    result = runner.invoke(
+        app,
+        [
+            "cost",
+            "trend",
+            "--all-subscriptions",
+            "--output",
+            str(csv_path),
+            "--output",
+            str(json_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert csv_path.exists()
+    assert json_path.exists()
+    assert "Wrote trend" in result.stdout
+
+
 def test_budget_status(mocker: MockerFixture) -> None:
     mocker.patch("azure_finops_dashboard.cli.auth.get_credential")
     mocker.patch("azure_finops_dashboard.cli.config.load_config", return_value=Config())
@@ -322,6 +429,40 @@ def test_budget_status(mocker: MockerFixture) -> None:
     assert "Sub One" in result.stdout
     assert "monthly-budget" in result.stdout
     assert "breached" in result.stdout
+
+
+def test_budget_status_with_output(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch("azure_finops_dashboard.cli.auth.get_credential")
+    mocker.patch("azure_finops_dashboard.cli.config.load_config", return_value=Config())
+    mocker.patch(
+        "azure_finops_dashboard.cli.subscriptions.list_subscriptions",
+        return_value=[
+            SubscriptionInfo(subscription_id="sub-1", display_name="Sub One", state="Enabled")
+        ],
+    )
+    mocker.patch(
+        "azure_finops_dashboard.cli.budgets.list_budget_statuses",
+        return_value=[
+            BudgetStatus(
+                name="monthly-budget",
+                amount=100.0,
+                current_spend=150.0,
+                currency="USD",
+                time_grain="Monthly",
+                percent_used=150.0,
+                status="breached",
+            )
+        ],
+    )
+    output_path = tmp_path / "budgets.csv"
+
+    result = runner.invoke(
+        app, ["budget", "status", "--all-subscriptions", "--output", str(output_path)]
+    )
+
+    assert result.exit_code == 0
+    assert output_path.exists()
+    assert "Wrote budget status" in result.stdout
 
 
 def test_budget_status_no_budgets_configured(mocker: MockerFixture) -> None:
@@ -459,6 +600,73 @@ def test_audit_run_combines_findings_from_all_detectors(mocker: MockerFixture) -
     assert "res-1" in result.stdout  # untagged resource finding
     assert "vm-1" in result.stdout  # idle VM finding
     assert "high" in result.stdout  # idle VM finding's severity
+
+
+def test_audit_run_passes_region_to_all_fetchers(mocker: MockerFixture) -> None:
+    mocker.patch("azure_finops_dashboard.cli.auth.get_credential")
+    mocker.patch("azure_finops_dashboard.cli.config.load_config", return_value=Config())
+    mocker.patch(
+        "azure_finops_dashboard.cli.subscriptions.list_subscriptions",
+        return_value=[
+            SubscriptionInfo(subscription_id="sub-1", display_name="Sub One", state="Enabled")
+        ],
+    )
+    fetch_resources = mocker.patch(
+        "azure_finops_dashboard.cli.audit_queries.fetch_resources", return_value=[]
+    )
+    fetch_vms = mocker.patch("azure_finops_dashboard.cli.audit_queries.fetch_vms", return_value=[])
+    fetch_disks = mocker.patch(
+        "azure_finops_dashboard.cli.audit_queries.fetch_disks", return_value=[]
+    )
+    fetch_ips = mocker.patch(
+        "azure_finops_dashboard.cli.audit_queries.fetch_public_ips", return_value=[]
+    )
+
+    result = runner.invoke(
+        app, ["audit", "run", "--all-subscriptions", "--region", "eastus", "--region", "westus"]
+    )
+
+    assert result.exit_code == 0
+    for mock_fetch in (fetch_resources, fetch_vms, fetch_disks, fetch_ips):
+        mock_fetch.assert_called_once_with(mocker.ANY, "sub-1", ["eastus", "westus"])
+
+
+def test_audit_run_with_output_stamps_subscription_id(
+    mocker: MockerFixture, tmp_path: Path
+) -> None:
+    mocker.patch("azure_finops_dashboard.cli.auth.get_credential")
+    mocker.patch("azure_finops_dashboard.cli.config.load_config", return_value=Config())
+    mocker.patch(
+        "azure_finops_dashboard.cli.subscriptions.list_subscriptions",
+        return_value=[
+            SubscriptionInfo(subscription_id="sub-1", display_name="Sub One", state="Enabled")
+        ],
+    )
+    mocker.patch(
+        "azure_finops_dashboard.cli.audit_queries.fetch_resources",
+        return_value=[ResourceInfo("id-1", "res-1", "rg-a", "storage_account", tags={})],
+    )
+    mocker.patch("azure_finops_dashboard.cli.audit_queries.fetch_vms", return_value=[])
+    mocker.patch("azure_finops_dashboard.cli.audit_queries.fetch_disks", return_value=[])
+    mocker.patch("azure_finops_dashboard.cli.audit_queries.fetch_public_ips", return_value=[])
+    output_path = tmp_path / "findings.json"
+
+    result = runner.invoke(
+        app, ["audit", "run", "--all-subscriptions", "--output", str(output_path)]
+    )
+
+    assert result.exit_code == 0
+    data = json.loads(output_path.read_text(encoding="utf-8"))
+    assert data == [
+        {
+            "subscription_id": "sub-1",
+            "severity": "low",
+            "resource_type": "storage_account",
+            "resource_group": "rg-a",
+            "resource_name": "res-1",
+            "issue": "No tags applied",
+        }
+    ]
 
 
 def test_audit_run_no_findings(mocker: MockerFixture) -> None:

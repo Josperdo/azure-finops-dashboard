@@ -25,6 +25,7 @@ class BudgetStatus:
     time_grain: str
     percent_used: float
     status: str  # "breached" | "warning" | "ok"
+    subscription_id: str = ""
 
 
 def _status_for(percent_used: float) -> str:
@@ -66,6 +67,7 @@ def list_budget_statuses(credential: TokenCredential, subscription_id: str) -> l
                 time_grain=str(budget.time_grain) if budget.time_grain else "",
                 percent_used=percent_used,
                 status=_status_for(percent_used),
+                subscription_id=subscription_id,
             )
         )
     return sorted(statuses, key=lambda s: STATUS_ORDER.get(s.status, 99))

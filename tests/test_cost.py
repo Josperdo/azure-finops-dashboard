@@ -84,11 +84,42 @@ def test_get_cost_summary_with_tag_key_runs_extra_query(mocker: MockerFixture) -
     mocker.patch("azure_finops_dashboard.cost.CostManagementClient", return_value=mock_client)
 
     summary = get_cost_summary(
-        credential=MagicMock(), subscription_id="sub-1", tag_key="Environment"
+        credential=MagicMock(), subscription_id="sub-1", tag_keys=["Environment"]
     )
 
-    assert summary.by_tag == [("prod", 7.0), ("dev", 3.0)]
+    assert summary.by_tag == {"Environment": [("prod", 7.0), ("dev", 3.0)]}
     assert mock_client.query.usage.call_count == 4
+
+
+def test_get_cost_summary_multiple_tag_keys_run_one_query_each(mocker: MockerFixture) -> None:
+    total_result = _fake_result(["Cost", "Currency"], [[10.0, "USD"]])
+    service_result = _fake_result(["ServiceName", "Cost", "Currency"], [])
+    rg_result = _fake_result(["ResourceGroupName", "Cost", "Currency"], [])
+    env_result = _fake_result(
+        ["TagKey", "TagValue", "Cost", "Currency"], [["environment", "prod", 7.0, "USD"]]
+    )
+    team_result = _fake_result(
+        ["TagKey", "TagValue", "Cost", "Currency"], [["team", "platform", 5.0, "USD"]]
+    )
+    mock_client = MagicMock()
+    mock_client.query.usage.side_effect = [
+        total_result,
+        service_result,
+        rg_result,
+        env_result,
+        team_result,
+    ]
+    mocker.patch("azure_finops_dashboard.cost.CostManagementClient", return_value=mock_client)
+
+    summary = get_cost_summary(
+        credential=MagicMock(), subscription_id="sub-1", tag_keys=["Environment", "Team"]
+    )
+
+    assert summary.by_tag == {
+        "Environment": [("prod", 7.0)],
+        "Team": [("platform", 5.0)],
+    }
+    assert mock_client.query.usage.call_count == 5
 
 
 def test_get_cost_summary_tag_key_handles_null_tag_value(mocker: MockerFixture) -> None:
@@ -106,10 +137,10 @@ def test_get_cost_summary_tag_key_handles_null_tag_value(mocker: MockerFixture) 
     mocker.patch("azure_finops_dashboard.cost.CostManagementClient", return_value=mock_client)
 
     summary = get_cost_summary(
-        credential=MagicMock(), subscription_id="sub-1", tag_key="Environment"
+        credential=MagicMock(), subscription_id="sub-1", tag_keys=["Environment"]
     )
 
-    assert summary.by_tag == [("(none)", 0.0)]
+    assert summary.by_tag == {"Environment": [("(none)", 0.0)]}
 
 
 def test_get_cost_summary_without_tag_key_skips_extra_query(mocker: MockerFixture) -> None:
@@ -122,7 +153,7 @@ def test_get_cost_summary_without_tag_key_skips_extra_query(mocker: MockerFixtur
 
     summary = get_cost_summary(credential=MagicMock(), subscription_id="sub-1")
 
-    assert summary.by_tag == []
+    assert summary.by_tag == {}
     assert mock_client.query.usage.call_count == 3
 
 
@@ -190,3 +221,27 @@ def test_rollup_cost_summaries_empty_list() -> None:
     rollup = rollup_cost_summaries([])
     assert rollup.total_cost == 0.0
     assert rollup.currency == ""
+
+
+def test_rollup_cost_summaries_merges_by_tag_per_key() -> None:
+    summaries = [
+        CostSummary(
+            subscription_id="sub-1",
+            currency="USD",
+            total_cost=100.0,
+            by_tag={"Environment": [("prod", 80.0)], "Team": [("platform", 100.0)]},
+        ),
+        CostSummary(
+            subscription_id="sub-2",
+            currency="USD",
+            total_cost=50.0,
+            by_tag={"Environment": [("prod", 20.0), ("dev", 30.0)]},
+        ),
+    ]
+
+    rollup = rollup_cost_summaries(summaries, top_n=2)
+
+    assert rollup.by_tag == {
+        "Environment": [("prod", 100.0), ("dev", 30.0)],
+        "Team": [("platform", 100.0)],
+    }

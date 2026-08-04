@@ -31,10 +31,18 @@ def _resource_group_from_id(resource_id: str) -> str:
     return ""
 
 
-def fetch_resources(credential: TokenCredential, subscription_id: str) -> list[ResourceInfo]:
+def _region_filter(regions: list[str] | None) -> set[str] | None:
+    if not regions:
+        return None
+    return {r.lower() for r in regions}
+
+
+def fetch_resources(
+    credential: TokenCredential, subscription_id: str, regions: list[str] | None = None
+) -> list[ResourceInfo]:
     """List every resource in the subscription, for untagged-resource detection."""
     client = ResourceGraphClient(credential, **CLIENT_KWARGS)
-    query = "Resources | project id, name, resourceGroup, type, tags"
+    query = "Resources | project id, name, resourceGroup, type, tags, location"
 
     resources = []
     skip_token: str | None = None
@@ -57,15 +65,22 @@ def fetch_resources(credential: TokenCredential, subscription_id: str) -> list[R
                     resource_group=row["resourceGroup"],
                     resource_type=row["type"],
                     tags=row.get("tags") or {},
+                    location=row.get("location") or "",
                 )
             )
         skip_token = getattr(result, "skip_token", None)
         if not skip_token:
             break
+
+    wanted = _region_filter(regions)
+    if wanted is not None:
+        resources = [r for r in resources if r.location.lower() in wanted]
     return resources
 
 
-def fetch_vms(credential: TokenCredential, subscription_id: str) -> list[VmInfo]:
+def fetch_vms(
+    credential: TokenCredential, subscription_id: str, regions: list[str] | None = None
+) -> list[VmInfo]:
     """List VMs with their power state, for idle-VM detection."""
     client = ComputeManagementClient(credential, subscription_id, **CLIENT_KWARGS)
     vms = []
@@ -85,12 +100,19 @@ def fetch_vms(credential: TokenCredential, subscription_id: str) -> list[VmInfo]
                 name=vm.name,
                 resource_group=_resource_group_from_id(vm.id),
                 power_state=power_state,
+                location=vm.location or "",
             )
         )
+
+    wanted = _region_filter(regions)
+    if wanted is not None:
+        vms = [v for v in vms if v.location.lower() in wanted]
     return vms
 
 
-def fetch_disks(credential: TokenCredential, subscription_id: str) -> list[DiskInfo]:
+def fetch_disks(
+    credential: TokenCredential, subscription_id: str, regions: list[str] | None = None
+) -> list[DiskInfo]:
     """List managed disks, for unattached-disk detection."""
     client = ComputeManagementClient(credential, subscription_id, **CLIENT_KWARGS)
     disks = []
@@ -104,12 +126,19 @@ def fetch_disks(credential: TokenCredential, subscription_id: str) -> list[DiskI
                 resource_group=_resource_group_from_id(disk.id),
                 managed_by=disk.managed_by,
                 disk_size_gb=disk.disk_size_gb or 0,
+                location=disk.location or "",
             )
         )
+
+    wanted = _region_filter(regions)
+    if wanted is not None:
+        disks = [d for d in disks if d.location.lower() in wanted]
     return disks
 
 
-def fetch_public_ips(credential: TokenCredential, subscription_id: str) -> list[PublicIpInfo]:
+def fetch_public_ips(
+    credential: TokenCredential, subscription_id: str, regions: list[str] | None = None
+) -> list[PublicIpInfo]:
     """List public IPs, for orphaned-IP detection."""
     client = NetworkManagementClient(credential, subscription_id, **CLIENT_KWARGS)
     ips = []
@@ -122,6 +151,11 @@ def fetch_public_ips(credential: TokenCredential, subscription_id: str) -> list[
                 name=ip.name,
                 resource_group=_resource_group_from_id(ip.id),
                 ip_configuration_id=ip.ip_configuration.id if ip.ip_configuration else None,
+                location=ip.location or "",
             )
         )
+
+    wanted = _region_filter(regions)
+    if wanted is not None:
+        ips = [ip for ip in ips if ip.location.lower() in wanted]
     return ips

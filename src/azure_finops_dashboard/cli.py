@@ -1,5 +1,8 @@
+import dataclasses
+from collections.abc import Callable
 from datetime import date, datetime, time, timezone
 from pathlib import Path
+from typing import Any
 
 import typer
 from azure.core.credentials import TokenCredential
@@ -71,6 +74,23 @@ def _progress() -> Progress:
     )
 
 
+def _export_all(
+    data: Any, output: list[Path], export_fn: Callable[[Any, Path], None], label: str
+) -> None:
+    """Write `data` to every path in `output`, format inferred per-path from its extension.
+
+    Multiple --output flags with different extensions is what gives "export to CSV, JSON,
+    and PDF in one run" - one mechanism serving two roadmap items at once.
+    """
+    for path in output:
+        try:
+            export_fn(data, path)
+        except Exception as exc:  # noqa: BLE001 - translated into a friendly message below
+            console.print(f"[red]Error:[/red] {friendly_error(exc)}")
+            raise typer.Exit(1) from exc
+        console.print(f"Wrote {label} to [bold]{path}[/bold]")
+
+
 def _print_cost_summary(label: str, summary: cost.CostSummary, show_title: bool = True) -> None:
     headline = f"[bold]{summary.total_cost:,.2f} {summary.currency}[/bold]"
     console.print(Panel(headline, title=label if show_title else None, border_style="cyan"))
@@ -89,11 +109,11 @@ def _print_cost_summary(label: str, summary: cost.CostSummary, show_title: bool 
         rg_table.add_row(name, f"{amount:,.2f}")
     console.print(rg_table)
 
-    if summary.by_tag:
-        tag_table = Table(title="Top by Tag", header_style="bold cyan")
+    for tag_key, pairs in summary.by_tag.items():
+        tag_table = Table(title=f"Top by Tag: {tag_key}", header_style="bold cyan")
         tag_table.add_column("Tag Value")
         tag_table.add_column("Cost", justify="right")
-        for name, amount in summary.by_tag:
+        for name, amount in pairs:
             tag_table.add_row(name, f"{amount:,.2f}")
         console.print(tag_table)
 
@@ -148,11 +168,11 @@ def cost_summary(
         "mtd", "--timeframe", help="Time period to summarize: 'mtd' or 'last-month'."
     ),
     top: int = typer.Option(10, "--top", help="Number of services/resource groups to show."),
-    output: Path | None = typer.Option(
-        None, "--output", help="Also write the summary to a file (.csv, .json, or .pdf)."
+    output: list[Path] = typer.Option(
+        [], "--output", help="Also write the summary to a file (.csv, .json, or .pdf; repeatable)."
     ),
-    tag_key: str | None = typer.Option(
-        None, "--tag-key", help="Also break down spend by the values of this tag key."
+    tag_key: list[str] = typer.Option(
+        [], "--tag-key", help="Also break down spend by the values of this tag key (repeatable)."
     ),
     start: str | None = typer.Option(
         None, "--start", help="Custom range start date (YYYY-MM-DD). Requires --end."
@@ -207,7 +227,7 @@ def cost_summary(
                     subscription_id,
                     timeframe=query_timeframe,
                     top_n=top,
-                    tag_key=tag_key,
+                    tag_keys=tag_key or None,
                     time_period=time_period,
                 )
         except Exception as exc:  # noqa: BLE001 - translated into a friendly message below
@@ -221,13 +241,8 @@ def cost_summary(
         _print_cost_summary("All Subscriptions", rollup_summary)
         summaries.append(rollup_summary)
 
-    if output is not None and summaries:
-        try:
-            export.export_cost_summaries(summaries, output)
-        except Exception as exc:  # noqa: BLE001 - translated into a friendly message below
-            console.print(f"[red]Error:[/red] {friendly_error(exc)}")
-            raise typer.Exit(1) from exc
-        console.print(f"Wrote summary to [bold]{output}[/bold]")
+    if output and summaries:
+        _export_all(summaries, output, export.export_cost_summaries, "summary")
 
 
 @cost_app.command("trend")
@@ -239,6 +254,9 @@ def cost_trend(
         False, "--all-subscriptions", help="Query every subscription visible to this identity."
     ),
     months: int = typer.Option(6, "--months", help="Number of trailing months to show."),
+    output: list[Path] = typer.Option(
+        [], "--output", help="Also write the trend to a file (.csv, .json, or .pdf; repeatable)."
+    ),
 ) -> None:
     """Show a monthly spend trend with month-over-month change."""
     try:
@@ -249,6 +267,7 @@ def cost_trend(
         console.print(f"[red]Error:[/red] {friendly_error(exc)}")
         raise typer.Exit(1) from exc
 
+    trends: list[trend.TrendSummary] = []
     for subscription_id in subscription_ids:
         label = names_by_id.get(subscription_id, subscription_id)
         try:
@@ -258,8 +277,12 @@ def cost_trend(
         except Exception as exc:  # noqa: BLE001 - translated into a friendly message below
             console.print(f"[red]Error ({label}):[/red] {friendly_error(exc)}")
             continue
+        trends.append(summary)
         console.print(Panel(f"[bold]{label}[/bold]", border_style="cyan"))
         console.print(trend.render_trend(summary))
+
+    if output and trends:
+        _export_all(trends, output, export.export_trend, "trend")
 
 
 @budget_app.command("status")
@@ -269,6 +292,11 @@ def budget_status(
     ),
     all_subscriptions: bool = typer.Option(
         False, "--all-subscriptions", help="Query every subscription visible to this identity."
+    ),
+    output: list[Path] = typer.Option(
+        [],
+        "--output",
+        help="Also write budget status to a file (.csv, .json, or .pdf; repeatable).",
     ),
 ) -> None:
     """Show budget status and breach flags for each subscription."""
@@ -280,6 +308,7 @@ def budget_status(
         console.print(f"[red]Error:[/red] {friendly_error(exc)}")
         raise typer.Exit(1) from exc
 
+    all_statuses: list[budgets.BudgetStatus] = []
     for subscription_id in subscription_ids:
         label = names_by_id.get(subscription_id, subscription_id)
         try:
@@ -293,7 +322,11 @@ def budget_status(
         if not statuses:
             console.print("No budgets configured for this subscription.")
             continue
+        all_statuses.extend(statuses)
         console.print(budgets.render_budget_status(statuses))
+
+    if output and all_statuses:
+        _export_all(all_statuses, output, export.export_budget_statuses, "budget status")
 
 
 @app.command("dashboard")
@@ -361,6 +394,12 @@ def audit_run(
     all_subscriptions: bool = typer.Option(
         False, "--all-subscriptions", help="Query every subscription visible to this identity."
     ),
+    region: list[str] = typer.Option(
+        [], "--region", help="Only scan resources in these Azure regions (repeatable)."
+    ),
+    output: list[Path] = typer.Option(
+        [], "--output", help="Also write findings to a file (.csv, .json, or .pdf; repeatable)."
+    ),
 ) -> None:
     """Scan for untagged resources, idle VMs, unattached disks, and orphaned public IPs."""
     try:
@@ -371,41 +410,55 @@ def audit_run(
         console.print(f"[red]Error:[/red] {friendly_error(exc)}")
         raise typer.Exit(1) from exc
 
+    regions = region or None
+    all_findings: list[audit.Finding] = []
     for subscription_id in subscription_ids:
         label = names_by_id.get(subscription_id, subscription_id)
         console.rule(f"[bold cyan]{label}[/bold cyan]")
 
-        findings = []
+        findings: list[audit.Finding] = []
 
         try:
             with _progress() as progress:
                 progress.add_task(f"Scanning resources for {label}...", total=None)
-                resources = audit_queries.fetch_resources(credential, subscription_id)
-            findings += audit.find_untagged_resources(resources)
+                resources = audit_queries.fetch_resources(credential, subscription_id, regions)
+            findings += [
+                dataclasses.replace(f, subscription_id=subscription_id)
+                for f in audit.find_untagged_resources(resources)
+            ]
         except Exception as exc:  # noqa: BLE001 - translated into a friendly message below
             console.print(f"[red]Error ({label}, resources):[/red] {friendly_error(exc)}")
 
         try:
             with _progress() as progress:
                 progress.add_task(f"Scanning VMs for {label}...", total=None)
-                vms = audit_queries.fetch_vms(credential, subscription_id)
-            findings += audit.find_idle_vms(vms)
+                vms = audit_queries.fetch_vms(credential, subscription_id, regions)
+            findings += [
+                dataclasses.replace(f, subscription_id=subscription_id)
+                for f in audit.find_idle_vms(vms)
+            ]
         except Exception as exc:  # noqa: BLE001 - translated into a friendly message below
             console.print(f"[red]Error ({label}, VMs):[/red] {friendly_error(exc)}")
 
         try:
             with _progress() as progress:
                 progress.add_task(f"Scanning disks for {label}...", total=None)
-                disks = audit_queries.fetch_disks(credential, subscription_id)
-            findings += audit.find_unattached_disks(disks)
+                disks = audit_queries.fetch_disks(credential, subscription_id, regions)
+            findings += [
+                dataclasses.replace(f, subscription_id=subscription_id)
+                for f in audit.find_unattached_disks(disks)
+            ]
         except Exception as exc:  # noqa: BLE001 - translated into a friendly message below
             console.print(f"[red]Error ({label}, disks):[/red] {friendly_error(exc)}")
 
         try:
             with _progress() as progress:
                 progress.add_task(f"Scanning public IPs for {label}...", total=None)
-                ips = audit_queries.fetch_public_ips(credential, subscription_id)
-            findings += audit.find_orphaned_public_ips(ips)
+                ips = audit_queries.fetch_public_ips(credential, subscription_id, regions)
+            findings += [
+                dataclasses.replace(f, subscription_id=subscription_id)
+                for f in audit.find_orphaned_public_ips(ips)
+            ]
         except Exception as exc:  # noqa: BLE001 - translated into a friendly message below
             console.print(f"[red]Error ({label}, public IPs):[/red] {friendly_error(exc)}")
 
@@ -413,6 +466,10 @@ def audit_run(
             console.print(audit.render_audit_report(findings))
         else:
             console.print("No findings.")
+        all_findings.extend(findings)
+
+    if output and all_findings:
+        _export_all(all_findings, output, export.export_findings, "audit findings")
 
 
 def main() -> None:
