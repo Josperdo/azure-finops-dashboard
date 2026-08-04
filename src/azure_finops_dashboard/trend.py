@@ -114,6 +114,17 @@ def _ascii_bar(value: float, max_value: float, width: int = 20) -> str:
     return "#" * filled + "-" * (width - filled)
 
 
+def _delta_color(delta: float | None) -> str:
+    # No prior month to compare against - not a judgment either way, leave uncolored.
+    if delta is None:
+        return ""
+    if delta > 0:
+        return "red"  # spend went up
+    if delta < 0:
+        return "green"  # spend went down
+    return "yellow"  # unchanged
+
+
 def render_trend(trend: TrendSummary) -> Table:
     table = Table(title="Spend Trend", header_style="bold cyan")
     table.add_column("Month")
@@ -125,5 +136,9 @@ def render_trend(trend: TrendSummary) -> Table:
     for month, delta in zip(trend.months, trend.deltas, strict=True):
         change = "-" if delta is None else f"{delta:+.1f}%"
         bar = _ascii_bar(month.cost, max_cost)
+        color = _delta_color(delta)
+        if color:
+            change = f"[{color}]{change}[/{color}]"
+            bar = f"[{color}]{bar}[/{color}]"
         table.add_row(month.month, f"{month.cost:,.2f} {trend.currency}", change, bar)
     return table

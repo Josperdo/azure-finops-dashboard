@@ -386,10 +386,12 @@ def test_dashboard_combines_all_three_sections(mocker: MockerFixture) -> None:
     result = runner.invoke(app, ["dashboard", "--all-subscriptions"])
 
     assert result.exit_code == 0
-    assert "Sub One" in result.stdout
     assert "Compute" in result.stdout  # cost summary section
     assert "2024-01" in result.stdout  # trend section
     assert "monthly-budget" in result.stdout  # budget section
+    # Regression: the subscription name should appear once (the section-divider rule),
+    # not a second time as the cost panel's own redundant title right below it.
+    assert result.stdout.count("Sub One") == 1
 
 
 def test_dashboard_isolates_section_failures(mocker: MockerFixture) -> None:

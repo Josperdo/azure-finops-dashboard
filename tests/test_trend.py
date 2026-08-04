@@ -6,7 +6,13 @@ import pytest
 from pytest_mock import MockerFixture
 
 from azure_finops_dashboard.client_config import CLIENT_KWARGS
-from azure_finops_dashboard.trend import _billing_month_key, get_trend
+from azure_finops_dashboard.trend import (
+    TrendMonth,
+    TrendSummary,
+    _billing_month_key,
+    get_trend,
+    render_trend,
+)
 
 
 def _fake_result(rows: list[list[object]]) -> SimpleNamespace:
@@ -84,6 +90,29 @@ def test_billing_month_key_rejects_non_string() -> None:
 def test_billing_month_key_rejects_too_short_string() -> None:
     with pytest.raises(TypeError, match="Expected a billing month string"):
         _billing_month_key("2024")
+
+
+def test_render_trend_colors_bars_by_direction() -> None:
+    summary = TrendSummary(
+        subscription_id="sub-1",
+        currency="USD",
+        months=[
+            TrendMonth(month="2024-01", cost=100.0),
+            TrendMonth(month="2024-02", cost=150.0),  # increase
+            TrendMonth(month="2024-03", cost=50.0),  # decrease
+            TrendMonth(month="2024-04", cost=50.0),  # unchanged
+        ],
+        deltas=[None, 50.0, -66.7, 0.0],
+    )
+
+    table = render_trend(summary)
+    change_column = [str(cell) for cell in table.columns[2].cells]
+    trend_column = [str(cell) for cell in table.columns[3].cells]
+
+    assert "[red]" not in change_column[0] and "[green]" not in change_column[0]  # no prior month
+    assert "[red]" in change_column[1] and "[red]" in trend_column[1]  # increase
+    assert "[green]" in change_column[2] and "[green]" in trend_column[2]  # decrease
+    assert "[yellow]" in change_column[3] and "[yellow]" in trend_column[3]  # unchanged
 
 
 def test_get_trend_uses_tuned_client_kwargs(mocker: MockerFixture) -> None:

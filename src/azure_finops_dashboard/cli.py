@@ -6,6 +6,7 @@ from azure.core.credentials import TokenCredential
 from azure.mgmt.costmanagement.models import QueryTimePeriod
 from rich.console import Console
 from rich.panel import Panel
+from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
 from azure_finops_dashboard import (
@@ -54,9 +55,25 @@ def _resolve_credential_and_subscriptions(
     return credential, names_by_id, subscription_ids
 
 
-def _print_cost_summary(label: str, summary: cost.CostSummary) -> None:
+def _progress() -> Progress:
+    """A per-call progress display: spinner + description + elapsed time.
+
+    Not a determinate percentage bar - a single blocking API call has no real sub-progress
+    to report, and faking one would be misleading. This is still a genuine upgrade over a
+    bare spinner (visible elapsed time, consistent with Rich's fuller Progress styling).
+    """
+    return Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        TimeElapsedColumn(),
+        console=console,
+        transient=True,
+    )
+
+
+def _print_cost_summary(label: str, summary: cost.CostSummary, show_title: bool = True) -> None:
     headline = f"[bold]{summary.total_cost:,.2f} {summary.currency}[/bold]"
-    console.print(Panel(headline, title=label, border_style="cyan"))
+    console.print(Panel(headline, title=label if show_title else None, border_style="cyan"))
 
     service_table = Table(title="Top Services", header_style="bold cyan")
     service_table.add_column("Service")
@@ -183,7 +200,8 @@ def cost_summary(
     for subscription_id in subscription_ids:
         label = names_by_id.get(subscription_id, subscription_id)
         try:
-            with console.status(f"Fetching cost data for {label}..."):
+            with _progress() as progress:
+                progress.add_task(f"Fetching cost data for {label}...", total=None)
                 summary = cost.get_cost_summary(
                     credential,
                     subscription_id,
@@ -234,7 +252,8 @@ def cost_trend(
     for subscription_id in subscription_ids:
         label = names_by_id.get(subscription_id, subscription_id)
         try:
-            with console.status(f"Fetching trend data for {label}..."):
+            with _progress() as progress:
+                progress.add_task(f"Fetching trend data for {label}...", total=None)
                 summary = trend.get_trend(credential, subscription_id, months=months)
         except Exception as exc:  # noqa: BLE001 - translated into a friendly message below
             console.print(f"[red]Error ({label}):[/red] {friendly_error(exc)}")
@@ -264,7 +283,8 @@ def budget_status(
     for subscription_id in subscription_ids:
         label = names_by_id.get(subscription_id, subscription_id)
         try:
-            with console.status(f"Fetching budgets for {label}..."):
+            with _progress() as progress:
+                progress.add_task(f"Fetching budgets for {label}...", total=None)
                 statuses = budgets.list_budget_statuses(credential, subscription_id)
         except Exception as exc:  # noqa: BLE001 - translated into a friendly message below
             console.print(f"[red]Error ({label}):[/red] {friendly_error(exc)}")
@@ -298,27 +318,32 @@ def dashboard(
 
     for subscription_id in subscription_ids:
         label = names_by_id.get(subscription_id, subscription_id)
-        # _print_cost_summary's own panel already leads with the subscription name below -
-        # a lightweight rule (not another boxed panel) avoids printing it twice in a row,
-        # while still giving multi-subscription runs a clear per-subscription divider.
         console.rule(f"[bold cyan]{label}[/bold cyan]")
 
         try:
-            with console.status(f"Fetching cost data for {label}..."):
+            with _progress() as progress:
+                progress.add_task(f"Fetching cost data for {label}...", total=None)
                 summary = cost.get_cost_summary(credential, subscription_id, top_n=top)
-            _print_cost_summary(label, summary)
+            # The rule above already identifies the subscription for this whole block -
+            # showing the same name a second time as the panel's own title looked
+            # genuinely redundant once rendered with real Unicode borders (confirmed via
+            # a real screenshot; our own ASCII-fallback testing masked how similar the
+            # rule and the panel's title bar actually look).
+            _print_cost_summary(label, summary, show_title=False)
         except Exception as exc:  # noqa: BLE001 - translated into a friendly message below
             console.print(f"[red]Error ({label}, cost summary):[/red] {friendly_error(exc)}")
 
         try:
-            with console.status(f"Fetching trend data for {label}..."):
+            with _progress() as progress:
+                progress.add_task(f"Fetching trend data for {label}...", total=None)
                 trend_summary = trend.get_trend(credential, subscription_id, months=months)
             console.print(trend.render_trend(trend_summary))
         except Exception as exc:  # noqa: BLE001 - translated into a friendly message below
             console.print(f"[red]Error ({label}, trend):[/red] {friendly_error(exc)}")
 
         try:
-            with console.status(f"Fetching budgets for {label}..."):
+            with _progress() as progress:
+                progress.add_task(f"Fetching budgets for {label}...", total=None)
                 statuses = budgets.list_budget_statuses(credential, subscription_id)
             if statuses:
                 console.print(budgets.render_budget_status(statuses))
@@ -353,28 +378,32 @@ def audit_run(
         findings = []
 
         try:
-            with console.status(f"Scanning resources for {label}..."):
+            with _progress() as progress:
+                progress.add_task(f"Scanning resources for {label}...", total=None)
                 resources = audit_queries.fetch_resources(credential, subscription_id)
             findings += audit.find_untagged_resources(resources)
         except Exception as exc:  # noqa: BLE001 - translated into a friendly message below
             console.print(f"[red]Error ({label}, resources):[/red] {friendly_error(exc)}")
 
         try:
-            with console.status(f"Scanning VMs for {label}..."):
+            with _progress() as progress:
+                progress.add_task(f"Scanning VMs for {label}...", total=None)
                 vms = audit_queries.fetch_vms(credential, subscription_id)
             findings += audit.find_idle_vms(vms)
         except Exception as exc:  # noqa: BLE001 - translated into a friendly message below
             console.print(f"[red]Error ({label}, VMs):[/red] {friendly_error(exc)}")
 
         try:
-            with console.status(f"Scanning disks for {label}..."):
+            with _progress() as progress:
+                progress.add_task(f"Scanning disks for {label}...", total=None)
                 disks = audit_queries.fetch_disks(credential, subscription_id)
             findings += audit.find_unattached_disks(disks)
         except Exception as exc:  # noqa: BLE001 - translated into a friendly message below
             console.print(f"[red]Error ({label}, disks):[/red] {friendly_error(exc)}")
 
         try:
-            with console.status(f"Scanning public IPs for {label}..."):
+            with _progress() as progress:
+                progress.add_task(f"Scanning public IPs for {label}...", total=None)
                 ips = audit_queries.fetch_public_ips(credential, subscription_id)
             findings += audit.find_orphaned_public_ips(ips)
         except Exception as exc:  # noqa: BLE001 - translated into a friendly message below
