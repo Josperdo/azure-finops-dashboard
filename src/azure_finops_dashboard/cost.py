@@ -9,6 +9,8 @@ from azure.mgmt.costmanagement.models import (
     QueryGrouping,
 )
 
+from azure_finops_dashboard.query_utils import as_float, column_index, parse_query_result
+
 TIMEFRAMES = {"mtd": "MonthToDate", "last-month": "TheLastMonth"}
 
 
@@ -35,31 +37,15 @@ def _query(
         ),
     )
     result = client.query.usage(scope=scope, parameters=definition)
-    if result is None or result.columns is None or result.rows is None:
-        raise ValueError("Cost Management API returned an empty response")
-    columns = [str(c.name) for c in result.columns]
-    return columns, list(result.rows)
-
-
-def _column_index(columns: list[str], name: str) -> int:
-    for i, col in enumerate(columns):
-        if col == name:
-            return i
-    raise ValueError(f"Cost Management response is missing expected column '{name}'")
-
-
-def _as_float(value: object) -> float:
-    if isinstance(value, int | float | str):
-        return float(value)
-    raise TypeError(f"Expected a numeric cost value, got {type(value).__name__}")
+    return parse_query_result(result)
 
 
 def _rows_to_pairs(
     columns: list[str], rows: list[list[object]], group_by: str
 ) -> list[tuple[str, float]]:
-    name_idx = _column_index(columns, group_by)
-    cost_idx = _column_index(columns, "Cost")
-    pairs = [(str(row[name_idx]), _as_float(row[cost_idx])) for row in rows]
+    name_idx = column_index(columns, group_by)
+    cost_idx = column_index(columns, "Cost")
+    pairs = [(str(row[name_idx]), as_float(row[cost_idx])) for row in rows]
     return sorted(pairs, key=lambda p: p[1], reverse=True)
 
 
@@ -74,9 +60,9 @@ def get_cost_summary(
     scope = f"/subscriptions/{subscription_id}"
 
     total_columns, total_rows = _query(client, scope, timeframe, group_by=None)
-    cost_idx = _column_index(total_columns, "Cost")
-    currency_idx = _column_index(total_columns, "Currency")
-    total_cost = _as_float(total_rows[0][cost_idx]) if total_rows else 0.0
+    cost_idx = column_index(total_columns, "Cost")
+    currency_idx = column_index(total_columns, "Currency")
+    total_cost = as_float(total_rows[0][cost_idx]) if total_rows else 0.0
     currency = str(total_rows[0][currency_idx]) if total_rows else ""
 
     service_columns, service_rows = _query(client, scope, timeframe, group_by="ServiceName")

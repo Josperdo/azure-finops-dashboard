@@ -1,11 +1,21 @@
 from pathlib import Path
 
 import typer
+from azure.core.credentials import TokenCredential
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from azure_finops_dashboard import __version__, auth, config, cost, export, subscriptions
+from azure_finops_dashboard import (
+    __version__,
+    auth,
+    budgets,
+    config,
+    cost,
+    export,
+    subscriptions,
+    trend,
+)
 from azure_finops_dashboard.errors import friendly_error
 
 app = typer.Typer(
@@ -17,7 +27,25 @@ subscriptions_app = typer.Typer(help="Inspect subscriptions visible to the curre
 app.add_typer(subscriptions_app, name="subscriptions")
 cost_app = typer.Typer(help="Azure spend summaries.")
 app.add_typer(cost_app, name="cost")
+budget_app = typer.Typer(help="Azure budget status.")
+app.add_typer(budget_app, name="budget")
 console = Console()
+
+
+def _resolve_credential_and_subscriptions(
+    subscription: list[str], all_subscriptions: bool
+) -> tuple[TokenCredential, dict[str, str], list[str]]:
+    credential = auth.get_credential()
+    # Only pay for subscription discovery when --all-subscriptions actually needs it.
+    discovered = subscriptions.list_subscriptions(credential) if all_subscriptions else []
+    names_by_id = {sub.subscription_id: sub.display_name for sub in discovered}
+    subscription_ids = config.resolve_subscriptions(
+        cli_ids=subscription,
+        all_flag=all_subscriptions,
+        config=config.load_config(),
+        discovered=[sub.subscription_id for sub in discovered],
+    )
+    return credential, names_by_id, subscription_ids
 
 
 def _version_callback(value: bool) -> None:
@@ -80,15 +108,8 @@ def cost_summary(
         raise typer.Exit(1)
 
     try:
-        credential = auth.get_credential()
-        # Only pay for subscription discovery when --all-subscriptions actually needs it.
-        discovered = subscriptions.list_subscriptions(credential) if all_subscriptions else []
-        names_by_id = {sub.subscription_id: sub.display_name for sub in discovered}
-        subscription_ids = config.resolve_subscriptions(
-            cli_ids=subscription,
-            all_flag=all_subscriptions,
-            config=config.load_config(),
-            discovered=[sub.subscription_id for sub in discovered],
+        credential, names_by_id, subscription_ids = _resolve_credential_and_subscriptions(
+            subscription, all_subscriptions
         )
     except Exception as exc:  # noqa: BLE001 - translated into a friendly message below
         console.print(f"[red]Error:[/red] {friendly_error(exc)}")
@@ -134,6 +155,70 @@ def cost_summary(
             console.print(f"[red]Error:[/red] {friendly_error(exc)}")
             raise typer.Exit(1) from exc
         console.print(f"Wrote summary to [bold]{output}[/bold]")
+
+
+@cost_app.command("trend")
+def cost_trend(
+    subscription: list[str] = typer.Option(
+        [], "--subscription", help="Subscription ID to query (repeatable)."
+    ),
+    all_subscriptions: bool = typer.Option(
+        False, "--all-subscriptions", help="Query every subscription visible to this identity."
+    ),
+    months: int = typer.Option(6, "--months", help="Number of trailing months to show."),
+) -> None:
+    """Show a monthly spend trend with month-over-month change."""
+    try:
+        credential, names_by_id, subscription_ids = _resolve_credential_and_subscriptions(
+            subscription, all_subscriptions
+        )
+    except Exception as exc:  # noqa: BLE001 - translated into a friendly message below
+        console.print(f"[red]Error:[/red] {friendly_error(exc)}")
+        raise typer.Exit(1) from exc
+
+    for subscription_id in subscription_ids:
+        label = names_by_id.get(subscription_id, subscription_id)
+        try:
+            with console.status(f"Fetching trend data for {label}..."):
+                summary = trend.get_trend(credential, subscription_id, months=months)
+        except Exception as exc:  # noqa: BLE001 - translated into a friendly message below
+            console.print(f"[red]Error ({label}):[/red] {friendly_error(exc)}")
+            continue
+        console.print(Panel(f"[bold]{label}[/bold]"))
+        console.print(trend.render_trend(summary))
+
+
+@budget_app.command("status")
+def budget_status(
+    subscription: list[str] = typer.Option(
+        [], "--subscription", help="Subscription ID to query (repeatable)."
+    ),
+    all_subscriptions: bool = typer.Option(
+        False, "--all-subscriptions", help="Query every subscription visible to this identity."
+    ),
+) -> None:
+    """Show budget status and breach flags for each subscription."""
+    try:
+        credential, names_by_id, subscription_ids = _resolve_credential_and_subscriptions(
+            subscription, all_subscriptions
+        )
+    except Exception as exc:  # noqa: BLE001 - translated into a friendly message below
+        console.print(f"[red]Error:[/red] {friendly_error(exc)}")
+        raise typer.Exit(1) from exc
+
+    for subscription_id in subscription_ids:
+        label = names_by_id.get(subscription_id, subscription_id)
+        try:
+            with console.status(f"Fetching budgets for {label}..."):
+                statuses = budgets.list_budget_statuses(credential, subscription_id)
+        except Exception as exc:  # noqa: BLE001 - translated into a friendly message below
+            console.print(f"[red]Error ({label}):[/red] {friendly_error(exc)}")
+            continue
+        console.print(Panel(f"[bold]{label}[/bold]"))
+        if not statuses:
+            console.print("No budgets configured for this subscription.")
+            continue
+        console.print(budgets.render_budget_status(statuses))
 
 
 def main() -> None:

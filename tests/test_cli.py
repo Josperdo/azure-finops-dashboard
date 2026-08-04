@@ -5,10 +5,12 @@ from pytest_mock import MockerFixture
 from typer.testing import CliRunner
 
 from azure_finops_dashboard import __version__
+from azure_finops_dashboard.budgets import BudgetStatus
 from azure_finops_dashboard.cli import app
 from azure_finops_dashboard.config import Config
 from azure_finops_dashboard.cost import CostSummary
 from azure_finops_dashboard.subscriptions import SubscriptionInfo
+from azure_finops_dashboard.trend import TrendMonth, TrendSummary
 
 runner = CliRunner()
 
@@ -144,3 +146,82 @@ def test_cost_summary_friendly_error_per_subscription(mocker: MockerFixture) -> 
     assert result.exit_code == 0
     assert "az login" in result.stdout
     assert "Traceback" not in result.stdout
+
+
+def test_cost_trend(mocker: MockerFixture) -> None:
+    mocker.patch("azure_finops_dashboard.cli.auth.get_credential")
+    mocker.patch("azure_finops_dashboard.cli.config.load_config", return_value=Config())
+    mocker.patch(
+        "azure_finops_dashboard.cli.subscriptions.list_subscriptions",
+        return_value=[
+            SubscriptionInfo(subscription_id="sub-1", display_name="Sub One", state="Enabled")
+        ],
+    )
+    mocker.patch(
+        "azure_finops_dashboard.cli.trend.get_trend",
+        return_value=TrendSummary(
+            subscription_id="sub-1",
+            currency="USD",
+            months=[
+                TrendMonth(month="2024-01", cost=100.0),
+                TrendMonth(month="2024-02", cost=150.0),
+            ],
+            deltas=[None, 50.0],
+        ),
+    )
+
+    result = runner.invoke(app, ["cost", "trend", "--all-subscriptions"])
+
+    assert result.exit_code == 0
+    assert "Sub One" in result.stdout
+    assert "2024-01" in result.stdout
+    assert "2024-02" in result.stdout
+
+
+def test_budget_status(mocker: MockerFixture) -> None:
+    mocker.patch("azure_finops_dashboard.cli.auth.get_credential")
+    mocker.patch("azure_finops_dashboard.cli.config.load_config", return_value=Config())
+    mocker.patch(
+        "azure_finops_dashboard.cli.subscriptions.list_subscriptions",
+        return_value=[
+            SubscriptionInfo(subscription_id="sub-1", display_name="Sub One", state="Enabled")
+        ],
+    )
+    mocker.patch(
+        "azure_finops_dashboard.cli.budgets.list_budget_statuses",
+        return_value=[
+            BudgetStatus(
+                name="monthly-budget",
+                amount=100.0,
+                current_spend=150.0,
+                currency="USD",
+                time_grain="Monthly",
+                percent_used=150.0,
+                status="breached",
+            )
+        ],
+    )
+
+    result = runner.invoke(app, ["budget", "status", "--all-subscriptions"])
+
+    assert result.exit_code == 0
+    assert "Sub One" in result.stdout
+    assert "monthly-budget" in result.stdout
+    assert "breached" in result.stdout
+
+
+def test_budget_status_no_budgets_configured(mocker: MockerFixture) -> None:
+    mocker.patch("azure_finops_dashboard.cli.auth.get_credential")
+    mocker.patch("azure_finops_dashboard.cli.config.load_config", return_value=Config())
+    mocker.patch(
+        "azure_finops_dashboard.cli.subscriptions.list_subscriptions",
+        return_value=[
+            SubscriptionInfo(subscription_id="sub-1", display_name="Sub One", state="Enabled")
+        ],
+    )
+    mocker.patch("azure_finops_dashboard.cli.budgets.list_budget_statuses", return_value=[])
+
+    result = runner.invoke(app, ["budget", "status", "--all-subscriptions"])
+
+    assert result.exit_code == 0
+    assert "No budgets configured" in result.stdout
