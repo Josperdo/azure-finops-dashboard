@@ -1,3 +1,4 @@
+import time
 from dataclasses import dataclass, field
 
 from azure.core.credentials import TokenCredential
@@ -10,10 +11,18 @@ from azure.mgmt.costmanagement.models import (
     QueryTimePeriod,
 )
 
+from azure_finops_dashboard.client_config import CLIENT_KWARGS
 from azure_finops_dashboard.query_utils import as_float, column_index, parse_query_result
-from azure_finops_dashboard.retry_config import RETRY_KWARGS
 
 TIMEFRAMES = {"mtd": "MonthToDate", "last-month": "TheLastMonth"}
+
+# Cost Management is reported to throttle around 4 calls per scope per minute
+# (https://learn.microsoft.com/en-us/answers/questions/1520105/) - get_cost_summary makes
+# 3-4 sequential calls itself, and firing them with zero pacing risks tripping that ceiling
+# even with a dedicated ClientType quota pool (confirmed: a single-call query succeeded live
+# while this function's 4-call burst still got a 429, immediately after the ClientType fix
+# was added). This doesn't guarantee avoiding it, just makes a burst less likely to trip it.
+_CALL_PACING_SECONDS = 2.0
 
 
 @dataclass
@@ -52,7 +61,13 @@ def _rows_to_pairs(
 ) -> list[tuple[str, float]]:
     name_idx = column_index(columns, group_by)
     cost_idx = column_index(columns, "Cost")
-    pairs = [(str(row[name_idx]), as_float(row[cost_idx])) for row in rows]
+    pairs = [
+        (
+            str(row[name_idx]) if row[name_idx] is not None else "(none)",
+            as_float(row[cost_idx]),
+        )
+        for row in rows
+    ]
     return sorted(pairs, key=lambda p: p[1], reverse=True)
 
 
@@ -89,7 +104,7 @@ def get_cost_summary(
     `timeframe` follows the Cost Management API's TimeframeType values (e.g.
     "MonthToDate", "TheLastMonth", or "Custom" when `time_period` is supplied).
     """
-    client = CostManagementClient(credential, **RETRY_KWARGS)
+    client = CostManagementClient(credential, **CLIENT_KWARGS)
     scope = f"/subscriptions/{subscription_id}"
 
     total_columns, total_rows = _query(
@@ -100,6 +115,7 @@ def get_cost_summary(
     total_cost = as_float(total_rows[0][cost_idx]) if total_rows else 0.0
     currency = str(total_rows[0][currency_idx]) if total_rows else ""
 
+    time.sleep(_CALL_PACING_SECONDS)
     service_columns, service_rows = _query(
         client,
         scope,
@@ -109,6 +125,7 @@ def get_cost_summary(
     )
     by_service = _rows_to_pairs(service_columns, service_rows, "ServiceName")[:top_n]
 
+    time.sleep(_CALL_PACING_SECONDS)
     rg_columns, rg_rows = _query(
         client,
         scope,
@@ -120,6 +137,7 @@ def get_cost_summary(
 
     by_tag: list[tuple[str, float]] = []
     if tag_key:
+        time.sleep(_CALL_PACING_SECONDS)
         tag_columns, tag_rows = _query(
             client,
             scope,
@@ -127,7 +145,9 @@ def get_cost_summary(
             grouping=QueryGrouping(type="TagKey", name=tag_key),
             time_period=time_period,
         )
-        by_tag = _rows_to_pairs(tag_columns, tag_rows, tag_key)[:top_n]
+        # TagKey groupings return fixed generic column names (TagKey/TagValue), not a
+        # column named after the tag key itself - confirmed live, an assumption otherwise.
+        by_tag = _rows_to_pairs(tag_columns, tag_rows, "TagValue")[:top_n]
 
     return CostSummary(
         subscription_id=subscription_id,

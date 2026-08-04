@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 from pytest_mock import MockerFixture
 
 from azure_finops_dashboard.budgets import BudgetStatus, list_budget_statuses
-from azure_finops_dashboard.retry_config import RETRY_KWARGS
+from azure_finops_dashboard.client_config import CLIENT_KWARGS
 
 
 def _fake_budget(name: str, amount: float, spend: float, currency: str = "USD") -> SimpleNamespace:
@@ -61,12 +61,12 @@ def test_list_budget_statuses_handles_zero_amount(mocker: MockerFixture) -> None
     ]
 
 
-def test_list_budget_statuses_uses_tuned_retry_kwargs(mocker: MockerFixture) -> None:
+def test_list_budget_statuses_uses_tuned_client_kwargs(mocker: MockerFixture) -> None:
     mock_client_cls = mocker.patch("azure_finops_dashboard.budgets.ConsumptionManagementClient")
     mock_client_cls.return_value.budgets.list.return_value = []
 
     list_budget_statuses(credential=MagicMock(), subscription_id="sub-1")
 
     _, kwargs = mock_client_cls.call_args
-    for key, value in RETRY_KWARGS.items():
+    for key, value in CLIENT_KWARGS.items():
         assert kwargs[key] == value

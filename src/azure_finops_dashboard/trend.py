@@ -11,8 +11,8 @@ from azure.mgmt.costmanagement.models import (
 )
 from rich.table import Table
 
+from azure_finops_dashboard.client_config import CLIENT_KWARGS
 from azure_finops_dashboard.query_utils import as_float, column_index, parse_query_result
-from azure_finops_dashboard.retry_config import RETRY_KWARGS
 
 
 @dataclass
@@ -60,7 +60,7 @@ def get_trend(
     credential: TokenCredential, subscription_id: str, months: int = 6
 ) -> TrendSummary:
     """Fetch monthly spend for the last `months` calendar months (rolling, includes MTD)."""
-    client = CostManagementClient(credential, **RETRY_KWARGS)
+    client = CostManagementClient(credential, **CLIENT_KWARGS)
     scope = f"/subscriptions/{subscription_id}"
 
     today = date.today()

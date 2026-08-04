@@ -338,3 +338,90 @@ def test_budget_status_no_budgets_configured(mocker: MockerFixture) -> None:
 
     assert result.exit_code == 0
     assert "No budgets configured" in result.stdout
+
+
+def test_dashboard_combines_all_three_sections(mocker: MockerFixture) -> None:
+    mocker.patch("azure_finops_dashboard.cli.auth.get_credential")
+    mocker.patch("azure_finops_dashboard.cli.config.load_config", return_value=Config())
+    mocker.patch(
+        "azure_finops_dashboard.cli.subscriptions.list_subscriptions",
+        return_value=[
+            SubscriptionInfo(subscription_id="sub-1", display_name="Sub One", state="Enabled")
+        ],
+    )
+    mocker.patch(
+        "azure_finops_dashboard.cli.cost.get_cost_summary",
+        return_value=CostSummary(
+            subscription_id="sub-1",
+            currency="USD",
+            total_cost=142.5,
+            by_service=[("Compute", 100.0)],
+        ),
+    )
+    mocker.patch(
+        "azure_finops_dashboard.cli.trend.get_trend",
+        return_value=TrendSummary(
+            subscription_id="sub-1",
+            currency="USD",
+            months=[TrendMonth(month="2024-01", cost=100.0)],
+            deltas=[None],
+        ),
+    )
+    mocker.patch(
+        "azure_finops_dashboard.cli.budgets.list_budget_statuses",
+        return_value=[
+            BudgetStatus(
+                name="monthly-budget",
+                amount=200.0,
+                current_spend=142.5,
+                currency="USD",
+                time_grain="Monthly",
+                percent_used=71.25,
+                status="ok",
+            )
+        ],
+    )
+
+    result = runner.invoke(app, ["dashboard", "--all-subscriptions"])
+
+    assert result.exit_code == 0
+    assert "Sub One" in result.stdout
+    assert "Compute" in result.stdout  # cost summary section
+    assert "2024-01" in result.stdout  # trend section
+    assert "monthly-budget" in result.stdout  # budget section
+
+
+def test_dashboard_isolates_section_failures(mocker: MockerFixture) -> None:
+    mocker.patch("azure_finops_dashboard.cli.auth.get_credential")
+    mocker.patch("azure_finops_dashboard.cli.config.load_config", return_value=Config())
+    mocker.patch(
+        "azure_finops_dashboard.cli.subscriptions.list_subscriptions",
+        return_value=[
+            SubscriptionInfo(subscription_id="sub-1", display_name="Sub One", state="Enabled")
+        ],
+    )
+    mocker.patch(
+        "azure_finops_dashboard.cli.cost.get_cost_summary",
+        return_value=CostSummary(
+            subscription_id="sub-1",
+            currency="USD",
+            total_cost=142.5,
+            by_service=[("Compute", 100.0)],
+        ),
+    )
+    mocker.patch(
+        "azure_finops_dashboard.cli.trend.get_trend",
+        side_effect=ClientAuthenticationError("no token"),
+    )
+    mocker.patch(
+        "azure_finops_dashboard.cli.budgets.list_budget_statuses",
+        return_value=[],
+    )
+
+    result = runner.invoke(app, ["dashboard", "--all-subscriptions"])
+
+    assert result.exit_code == 0
+    assert "Compute" in result.stdout  # cost summary still printed
+    assert "az login" in result.stdout  # trend's friendly error
+    assert "No budgets configured" in result.stdout  # budgets still printed
+    assert "Traceback" not in result.stdout

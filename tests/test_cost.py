@@ -1,11 +1,19 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
 from azure.mgmt.costmanagement.models import QueryTimePeriod
 from pytest_mock import MockerFixture
 
+from azure_finops_dashboard.client_config import CLIENT_KWARGS
 from azure_finops_dashboard.cost import CostSummary, get_cost_summary, rollup_cost_summaries
-from azure_finops_dashboard.retry_config import RETRY_KWARGS
+
+
+@pytest.fixture(autouse=True)
+def _no_real_sleep(mocker: MockerFixture) -> None:
+    # get_cost_summary paces its sequential calls with a real time.sleep() to avoid
+    # bursting Cost Management's throttling - don't actually wait for it in tests.
+    mocker.patch("azure_finops_dashboard.cost.time.sleep")
 
 
 def _fake_result(columns: list[str], rows: list[list]) -> SimpleNamespace:
@@ -59,12 +67,17 @@ def test_get_cost_summary_handles_no_rows(mocker: MockerFixture) -> None:
 
 
 def test_get_cost_summary_with_tag_key_runs_extra_query(mocker: MockerFixture) -> None:
+    # Real API shape confirmed live: TagKey groupings return fixed generic column names
+    # (TagKey/TagValue), not a column named after the requested tag key.
     total_result = _fake_result(["Cost", "Currency"], [[10.0, "USD"]])
     service_result = _fake_result(["ServiceName", "Cost", "Currency"], [])
     rg_result = _fake_result(["ResourceGroupName", "Cost", "Currency"], [])
     tag_result = _fake_result(
-        ["Environment", "Cost", "Currency"],
-        [["prod", 7.0, "USD"], ["dev", 3.0, "USD"]],
+        ["TagKey", "TagValue", "Cost", "Currency"],
+        [
+            ["environment", "prod", 7.0, "USD"],
+            ["environment", "dev", 3.0, "USD"],
+        ],
     )
     mock_client = MagicMock()
     mock_client.query.usage.side_effect = [total_result, service_result, rg_result, tag_result]
@@ -76,6 +89,27 @@ def test_get_cost_summary_with_tag_key_runs_extra_query(mocker: MockerFixture) -
 
     assert summary.by_tag == [("prod", 7.0), ("dev", 3.0)]
     assert mock_client.query.usage.call_count == 4
+
+
+def test_get_cost_summary_tag_key_handles_null_tag_value(mocker: MockerFixture) -> None:
+    # Confirmed live: a tag key can appear with a null TagValue and zero cost (e.g. tag
+    # applied to a resource but not yet attributed to any cost record).
+    total_result = _fake_result(["Cost", "Currency"], [[10.0, "USD"]])
+    service_result = _fake_result(["ServiceName", "Cost", "Currency"], [])
+    rg_result = _fake_result(["ResourceGroupName", "Cost", "Currency"], [])
+    tag_result = _fake_result(
+        ["TagKey", "TagValue", "Cost", "Currency"],
+        [["environment", None, 0.0, "USD"]],
+    )
+    mock_client = MagicMock()
+    mock_client.query.usage.side_effect = [total_result, service_result, rg_result, tag_result]
+    mocker.patch("azure_finops_dashboard.cost.CostManagementClient", return_value=mock_client)
+
+    summary = get_cost_summary(
+        credential=MagicMock(), subscription_id="sub-1", tag_key="Environment"
+    )
+
+    assert summary.by_tag == [("(none)", 0.0)]
 
 
 def test_get_cost_summary_without_tag_key_skips_extra_query(mocker: MockerFixture) -> None:
@@ -113,7 +147,7 @@ def test_get_cost_summary_passes_time_period_through(mocker: MockerFixture) -> N
         assert call.kwargs["parameters"].timeframe == "Custom"
 
 
-def test_get_cost_summary_uses_tuned_retry_kwargs(mocker: MockerFixture) -> None:
+def test_get_cost_summary_uses_tuned_client_kwargs(mocker: MockerFixture) -> None:
     mock_client_cls = mocker.patch("azure_finops_dashboard.cost.CostManagementClient")
     mock_client_cls.return_value.query.usage.return_value = _fake_result(
         ["ServiceName", "ResourceGroupName", "Cost", "Currency"], []
@@ -122,7 +156,7 @@ def test_get_cost_summary_uses_tuned_retry_kwargs(mocker: MockerFixture) -> None
     get_cost_summary(credential=MagicMock(), subscription_id="sub-1")
 
     _, kwargs = mock_client_cls.call_args
-    for key, value in RETRY_KWARGS.items():
+    for key, value in CLIENT_KWARGS.items():
         assert kwargs[key] == value
 
 

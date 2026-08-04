@@ -272,6 +272,58 @@ def budget_status(
         console.print(budgets.render_budget_status(statuses))
 
 
+@app.command("dashboard")
+def dashboard(
+    subscription: list[str] = typer.Option(
+        [], "--subscription", help="Subscription ID to query (repeatable)."
+    ),
+    all_subscriptions: bool = typer.Option(
+        False, "--all-subscriptions", help="Query every subscription visible to this identity."
+    ),
+    top: int = typer.Option(10, "--top", help="Number of services/resource groups to show."),
+    months: int = typer.Option(6, "--months", help="Number of trailing months for the trend."),
+) -> None:
+    """Show spend summary, trend, and budget status together in one run."""
+    try:
+        credential, names_by_id, subscription_ids = _resolve_credential_and_subscriptions(
+            subscription, all_subscriptions
+        )
+    except Exception as exc:  # noqa: BLE001 - translated into a friendly message below
+        console.print(f"[red]Error:[/red] {friendly_error(exc)}")
+        raise typer.Exit(1) from exc
+
+    for subscription_id in subscription_ids:
+        label = names_by_id.get(subscription_id, subscription_id)
+        # _print_cost_summary's own panel already leads with the subscription name below -
+        # a lightweight rule (not another boxed panel) avoids printing it twice in a row,
+        # while still giving multi-subscription runs a clear per-subscription divider.
+        console.rule(f"[bold cyan]{label}[/bold cyan]")
+
+        try:
+            with console.status(f"Fetching cost data for {label}..."):
+                summary = cost.get_cost_summary(credential, subscription_id, top_n=top)
+            _print_cost_summary(label, summary)
+        except Exception as exc:  # noqa: BLE001 - translated into a friendly message below
+            console.print(f"[red]Error ({label}, cost summary):[/red] {friendly_error(exc)}")
+
+        try:
+            with console.status(f"Fetching trend data for {label}..."):
+                trend_summary = trend.get_trend(credential, subscription_id, months=months)
+            console.print(trend.render_trend(trend_summary))
+        except Exception as exc:  # noqa: BLE001 - translated into a friendly message below
+            console.print(f"[red]Error ({label}, trend):[/red] {friendly_error(exc)}")
+
+        try:
+            with console.status(f"Fetching budgets for {label}..."):
+                statuses = budgets.list_budget_statuses(credential, subscription_id)
+            if statuses:
+                console.print(budgets.render_budget_status(statuses))
+            else:
+                console.print("No budgets configured for this subscription.")
+        except Exception as exc:  # noqa: BLE001 - translated into a friendly message below
+            console.print(f"[red]Error ({label}, budgets):[/red] {friendly_error(exc)}")
+
+
 def main() -> None:
     app()
 
