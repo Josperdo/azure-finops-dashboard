@@ -43,6 +43,8 @@ def _write_csv(summaries: list[CostSummary], path: Path) -> None:
                 writer.writerow(
                     [summary.subscription_id, summary.currency, "resource_group", name, amount]
                 )
+            for name, amount in summary.by_tag:
+                writer.writerow([summary.subscription_id, summary.currency, "tag", name, amount])
 
 
 def _write_json(summaries: list[CostSummary], path: Path) -> None:
@@ -55,6 +57,7 @@ def _write_json(summaries: list[CostSummary], path: Path) -> None:
             "by_resource_group": [
                 {"name": name, "cost": cost} for name, cost in summary.by_resource_group
             ],
+            "by_tag": [{"name": name, "cost": cost} for name, cost in summary.by_tag],
         }
         for summary in summaries
     ]
@@ -77,6 +80,10 @@ def _write_pdf(summaries: list[CostSummary], path: Path) -> None:
         story.append(Spacer(1, 12))
         story.append(Paragraph("Top Resource Groups", styles["Heading3"]))
         story.append(_table(summary.by_resource_group, "Resource Group"))
+        if summary.by_tag:
+            story.append(Spacer(1, 12))
+            story.append(Paragraph("Top by Tag", styles["Heading3"]))
+            story.append(_table(summary.by_tag, "Tag Value"))
         story.append(Spacer(1, 24))
 
     doc.build(story)

@@ -115,6 +115,119 @@ def test_cost_summary_with_output(mocker: MockerFixture, tmp_path: Path) -> None
     assert "Wrote summary" in result.stdout
 
 
+def test_cost_summary_with_tag_key(mocker: MockerFixture) -> None:
+    mocker.patch("azure_finops_dashboard.cli.auth.get_credential")
+    mocker.patch("azure_finops_dashboard.cli.config.load_config", return_value=Config())
+    mocker.patch(
+        "azure_finops_dashboard.cli.subscriptions.list_subscriptions",
+        return_value=[
+            SubscriptionInfo(subscription_id="sub-1", display_name="Sub One", state="Enabled")
+        ],
+    )
+    get_summary = mocker.patch(
+        "azure_finops_dashboard.cli.cost.get_cost_summary",
+        return_value=CostSummary(
+            subscription_id="sub-1",
+            currency="USD",
+            total_cost=142.5,
+            by_service=[("Compute", 100.0)],
+            by_resource_group=[("rg-a", 100.0)],
+            by_tag=[("prod", 100.0)],
+        ),
+    )
+
+    result = runner.invoke(
+        app, ["cost", "summary", "--all-subscriptions", "--tag-key", "Environment"]
+    )
+
+    assert result.exit_code == 0
+    assert "prod" in result.stdout
+    assert get_summary.call_args.kwargs["tag_key"] == "Environment"
+
+
+def test_cost_summary_start_end_must_be_paired() -> None:
+    result = runner.invoke(app, ["cost", "summary", "--start", "2024-01-01"])
+
+    assert result.exit_code == 1
+    assert "--start and --end must be given together" in result.stdout
+
+
+def test_cost_summary_malformed_date() -> None:
+    result = runner.invoke(
+        app, ["cost", "summary", "--start", "not-a-date", "--end", "2024-01-31"]
+    )
+
+    assert result.exit_code == 1
+    assert "YYYY-MM-DD" in result.stdout
+
+
+def test_cost_summary_custom_date_range_uses_custom_timeframe(mocker: MockerFixture) -> None:
+    mocker.patch("azure_finops_dashboard.cli.auth.get_credential")
+    mocker.patch("azure_finops_dashboard.cli.config.load_config", return_value=Config())
+    mocker.patch(
+        "azure_finops_dashboard.cli.subscriptions.list_subscriptions",
+        return_value=[
+            SubscriptionInfo(subscription_id="sub-1", display_name="Sub One", state="Enabled")
+        ],
+    )
+    get_summary = mocker.patch(
+        "azure_finops_dashboard.cli.cost.get_cost_summary",
+        return_value=CostSummary(subscription_id="sub-1", currency="USD", total_cost=1.0),
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "cost",
+            "summary",
+            "--all-subscriptions",
+            "--start",
+            "2024-01-01",
+            "--end",
+            "2024-01-31",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert get_summary.call_args.kwargs["timeframe"] == "Custom"
+    assert get_summary.call_args.kwargs["time_period"] is not None
+
+
+def test_cost_summary_rollup_combines_multiple_subscriptions(mocker: MockerFixture) -> None:
+    mocker.patch("azure_finops_dashboard.cli.auth.get_credential")
+    mocker.patch("azure_finops_dashboard.cli.config.load_config", return_value=Config())
+    mocker.patch(
+        "azure_finops_dashboard.cli.subscriptions.list_subscriptions",
+        return_value=[
+            SubscriptionInfo(subscription_id="sub-1", display_name="Sub One", state="Enabled"),
+            SubscriptionInfo(subscription_id="sub-2", display_name="Sub Two", state="Enabled"),
+        ],
+    )
+    mocker.patch(
+        "azure_finops_dashboard.cli.cost.get_cost_summary",
+        side_effect=[
+            CostSummary(
+                subscription_id="sub-1",
+                currency="USD",
+                total_cost=100.0,
+                by_service=[("Compute", 100.0)],
+            ),
+            CostSummary(
+                subscription_id="sub-2",
+                currency="USD",
+                total_cost=50.0,
+                by_service=[("Compute", 50.0)],
+            ),
+        ],
+    )
+
+    result = runner.invoke(app, ["cost", "summary", "--all-subscriptions", "--rollup"])
+
+    assert result.exit_code == 0
+    assert "All Subscriptions" in result.stdout
+    assert "150.00" in result.stdout
+
+
 def test_cost_summary_no_subscription_specified(mocker: MockerFixture) -> None:
     mocker.patch("azure_finops_dashboard.cli.auth.get_credential")
     mocker.patch("azure_finops_dashboard.cli.config.load_config", return_value=Config())

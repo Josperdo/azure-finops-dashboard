@@ -14,6 +14,7 @@ SUMMARIES = [
         total_cost=123.45,
         by_service=[("Compute", 100.0), ("Storage", 23.45)],
         by_resource_group=[("rg-a", 123.45)],
+        by_tag=[("prod", 123.45)],
     )
 ]
 
@@ -29,6 +30,7 @@ def test_export_csv(tmp_path: Path) -> None:
     assert ["sub-1", "USD", "total", "", "123.45"] in rows
     assert ["sub-1", "USD", "service", "Compute", "100.0"] in rows
     assert ["sub-1", "USD", "resource_group", "rg-a", "123.45"] in rows
+    assert ["sub-1", "USD", "tag", "prod", "123.45"] in rows
 
 
 def test_export_json(tmp_path: Path) -> None:
@@ -47,6 +49,7 @@ def test_export_json(tmp_path: Path) -> None:
                 {"name": "Storage", "cost": 23.45},
             ],
             "by_resource_group": [{"name": "rg-a", "cost": 123.45}],
+            "by_tag": [{"name": "prod", "cost": 123.45}],
         }
     ]
 

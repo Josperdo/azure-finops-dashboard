@@ -7,6 +7,8 @@ from azure.mgmt.consumption import ConsumptionManagementClient
 from azure.mgmt.consumption.models import Budget
 from rich.table import Table
 
+from azure_finops_dashboard.retry_config import RETRY_KWARGS
+
 WARNING_THRESHOLD = 80.0
 BREACH_THRESHOLD = 100.0
 
@@ -35,7 +37,9 @@ def _status_for(percent_used: float) -> str:
 
 def list_budget_statuses(credential: TokenCredential, subscription_id: str) -> list[BudgetStatus]:
     """List budgets for a subscription along with their current breach status."""
-    client = ConsumptionManagementClient(credential, subscription_id=subscription_id)
+    client = ConsumptionManagementClient(
+        credential, subscription_id=subscription_id, **RETRY_KWARGS
+    )
     scope = f"/subscriptions/{subscription_id}"
 
     # The generated SDK stub types this as Iterable[BudgetsListResult] (the page model),

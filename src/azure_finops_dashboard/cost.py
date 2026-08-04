@@ -7,9 +7,11 @@ from azure.mgmt.costmanagement.models import (
     QueryDataset,
     QueryDefinition,
     QueryGrouping,
+    QueryTimePeriod,
 )
 
 from azure_finops_dashboard.query_utils import as_float, column_index, parse_query_result
+from azure_finops_dashboard.retry_config import RETRY_KWARGS
 
 TIMEFRAMES = {"mtd": "MonthToDate", "last-month": "TheLastMonth"}
 
@@ -21,19 +23,24 @@ class CostSummary:
     total_cost: float
     by_service: list[tuple[str, float]] = field(default_factory=list)
     by_resource_group: list[tuple[str, float]] = field(default_factory=list)
+    by_tag: list[tuple[str, float]] = field(default_factory=list)
 
 
 def _query(
-    client: CostManagementClient, scope: str, timeframe: str, group_by: str | None
+    client: CostManagementClient,
+    scope: str,
+    timeframe: str,
+    grouping: QueryGrouping | None,
+    time_period: QueryTimePeriod | None = None,
 ) -> tuple[list[str], list[list[object]]]:
-    grouping = [QueryGrouping(type="Dimension", name=group_by)] if group_by else []
     definition = QueryDefinition(
         type="ActualCost",
         timeframe=timeframe,
+        time_period=time_period,
         dataset=QueryDataset(
             granularity=None,
             aggregation={"totalCost": QueryAggregation(name="Cost", function="Sum")},
-            grouping=grouping,
+            grouping=[grouping] if grouping else [],
         ),
     )
     result = client.query.usage(scope=scope, parameters=definition)
@@ -49,27 +56,78 @@ def _rows_to_pairs(
     return sorted(pairs, key=lambda p: p[1], reverse=True)
 
 
+def rollup_cost_summaries(summaries: list[CostSummary], top_n: int = 10) -> CostSummary:
+    """Combine multiple subscriptions' summaries into one merged view."""
+
+    def _merge(pair_lists: list[list[tuple[str, float]]]) -> list[tuple[str, float]]:
+        totals: dict[str, float] = {}
+        for pairs in pair_lists:
+            for name, amount in pairs:
+                totals[name] = totals.get(name, 0.0) + amount
+        return sorted(totals.items(), key=lambda p: p[1], reverse=True)[:top_n]
+
+    return CostSummary(
+        subscription_id="(all)",
+        currency=summaries[0].currency if summaries else "",
+        total_cost=sum(s.total_cost for s in summaries),
+        by_service=_merge([s.by_service for s in summaries]),
+        by_resource_group=_merge([s.by_resource_group for s in summaries]),
+        by_tag=_merge([s.by_tag for s in summaries]),
+    )
+
+
 def get_cost_summary(
     credential: TokenCredential,
     subscription_id: str,
     timeframe: str = "MonthToDate",
     top_n: int = 10,
+    tag_key: str | None = None,
+    time_period: QueryTimePeriod | None = None,
 ) -> CostSummary:
-    """Fetch a month-to-date (or last-month) cost summary for one subscription."""
-    client = CostManagementClient(credential)
+    """Fetch a cost summary for one subscription.
+
+    `timeframe` follows the Cost Management API's TimeframeType values (e.g.
+    "MonthToDate", "TheLastMonth", or "Custom" when `time_period` is supplied).
+    """
+    client = CostManagementClient(credential, **RETRY_KWARGS)
     scope = f"/subscriptions/{subscription_id}"
 
-    total_columns, total_rows = _query(client, scope, timeframe, group_by=None)
+    total_columns, total_rows = _query(
+        client, scope, timeframe, grouping=None, time_period=time_period
+    )
     cost_idx = column_index(total_columns, "Cost")
     currency_idx = column_index(total_columns, "Currency")
     total_cost = as_float(total_rows[0][cost_idx]) if total_rows else 0.0
     currency = str(total_rows[0][currency_idx]) if total_rows else ""
 
-    service_columns, service_rows = _query(client, scope, timeframe, group_by="ServiceName")
+    service_columns, service_rows = _query(
+        client,
+        scope,
+        timeframe,
+        grouping=QueryGrouping(type="Dimension", name="ServiceName"),
+        time_period=time_period,
+    )
     by_service = _rows_to_pairs(service_columns, service_rows, "ServiceName")[:top_n]
 
-    rg_columns, rg_rows = _query(client, scope, timeframe, group_by="ResourceGroupName")
+    rg_columns, rg_rows = _query(
+        client,
+        scope,
+        timeframe,
+        grouping=QueryGrouping(type="Dimension", name="ResourceGroupName"),
+        time_period=time_period,
+    )
     by_resource_group = _rows_to_pairs(rg_columns, rg_rows, "ResourceGroupName")[:top_n]
+
+    by_tag: list[tuple[str, float]] = []
+    if tag_key:
+        tag_columns, tag_rows = _query(
+            client,
+            scope,
+            timeframe,
+            grouping=QueryGrouping(type="TagKey", name=tag_key),
+            time_period=time_period,
+        )
+        by_tag = _rows_to_pairs(tag_columns, tag_rows, tag_key)[:top_n]
 
     return CostSummary(
         subscription_id=subscription_id,
@@ -77,4 +135,5 @@ def get_cost_summary(
         total_cost=total_cost,
         by_service=by_service,
         by_resource_group=by_resource_group,
+        by_tag=by_tag,
     )

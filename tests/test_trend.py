@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 
 from pytest_mock import MockerFixture
 
+from azure_finops_dashboard.retry_config import RETRY_KWARGS
 from azure_finops_dashboard.trend import get_trend
 
 
@@ -72,3 +73,15 @@ def test_get_trend_delta_handles_zero_prior_month(mocker: MockerFixture) -> None
     assert summary.deltas[0] is None  # first month has no prior month
     assert summary.deltas[1] == -100.0  # 100 -> 0
     assert summary.deltas[2] is None  # prior month (0) would divide by zero
+
+
+def test_get_trend_uses_tuned_retry_kwargs(mocker: MockerFixture) -> None:
+    mock_client_cls = mocker.patch("azure_finops_dashboard.trend.CostManagementClient")
+    mock_client_cls.return_value.query.usage.return_value = _fake_result([])
+    _freeze_today(mocker, datetime.date(2024, 3, 15))
+
+    get_trend(credential=MagicMock(), subscription_id="sub-1", months=3)
+
+    _, kwargs = mock_client_cls.call_args
+    for key, value in RETRY_KWARGS.items():
+        assert kwargs[key] == value

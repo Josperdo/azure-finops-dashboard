@@ -1,7 +1,9 @@
+from datetime import date, datetime, time, timezone
 from pathlib import Path
 
 import typer
 from azure.core.credentials import TokenCredential
+from azure.mgmt.costmanagement.models import QueryTimePeriod
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -46,6 +48,33 @@ def _resolve_credential_and_subscriptions(
         discovered=[sub.subscription_id for sub in discovered],
     )
     return credential, names_by_id, subscription_ids
+
+
+def _print_cost_summary(label: str, summary: cost.CostSummary) -> None:
+    headline = f"[bold]{summary.total_cost:,.2f} {summary.currency}[/bold]"
+    console.print(Panel(headline, title=label))
+
+    service_table = Table(title="Top Services")
+    service_table.add_column("Service")
+    service_table.add_column("Cost", justify="right")
+    for name, amount in summary.by_service:
+        service_table.add_row(name, f"{amount:,.2f}")
+    console.print(service_table)
+
+    rg_table = Table(title="Top Resource Groups")
+    rg_table.add_column("Resource Group")
+    rg_table.add_column("Cost", justify="right")
+    for name, amount in summary.by_resource_group:
+        rg_table.add_row(name, f"{amount:,.2f}")
+    console.print(rg_table)
+
+    if summary.by_tag:
+        tag_table = Table(title="Top by Tag")
+        tag_table.add_column("Tag Value")
+        tag_table.add_column("Cost", justify="right")
+        for name, amount in summary.by_tag:
+            tag_table.add_row(name, f"{amount:,.2f}")
+        console.print(tag_table)
 
 
 def _version_callback(value: bool) -> None:
@@ -101,11 +130,42 @@ def cost_summary(
     output: Path | None = typer.Option(
         None, "--output", help="Also write the summary to a file (.csv, .json, or .pdf)."
     ),
+    tag_key: str | None = typer.Option(
+        None, "--tag-key", help="Also break down spend by the values of this tag key."
+    ),
+    start: str | None = typer.Option(
+        None, "--start", help="Custom range start date (YYYY-MM-DD). Requires --end."
+    ),
+    end: str | None = typer.Option(
+        None, "--end", help="Custom range end date (YYYY-MM-DD). Requires --start."
+    ),
+    rollup: bool = typer.Option(
+        False, "--rollup", help="Also print a combined view across all queried subscriptions."
+    ),
 ) -> None:
     """Show month-to-date (or last-month) spend by service and resource group."""
     if timeframe not in cost.TIMEFRAMES:
         console.print(f"[red]Error:[/red] --timeframe must be one of {', '.join(cost.TIMEFRAMES)}")
         raise typer.Exit(1)
+
+    if bool(start) != bool(end):
+        console.print("[red]Error:[/red] --start and --end must be given together.")
+        raise typer.Exit(1)
+
+    query_timeframe = cost.TIMEFRAMES[timeframe]
+    time_period: QueryTimePeriod | None = None
+    if start and end:
+        try:
+            start_date = date.fromisoformat(start)
+            end_date = date.fromisoformat(end)
+        except ValueError:
+            console.print("[red]Error:[/red] --start/--end must be in YYYY-MM-DD format.")
+            raise typer.Exit(1) from None
+        time_period = QueryTimePeriod(
+            from_property=datetime.combine(start_date, time.min, tzinfo=timezone.utc),
+            to=datetime.combine(end_date, time.max, tzinfo=timezone.utc),
+        )
+        query_timeframe = "Custom"
 
     try:
         credential, names_by_id, subscription_ids = _resolve_credential_and_subscriptions(
@@ -123,30 +183,21 @@ def cost_summary(
                 summary = cost.get_cost_summary(
                     credential,
                     subscription_id,
-                    timeframe=cost.TIMEFRAMES[timeframe],
+                    timeframe=query_timeframe,
                     top_n=top,
+                    tag_key=tag_key,
+                    time_period=time_period,
                 )
         except Exception as exc:  # noqa: BLE001 - translated into a friendly message below
             console.print(f"[red]Error ({label}):[/red] {friendly_error(exc)}")
             continue
         summaries.append(summary)
+        _print_cost_summary(label, summary)
 
-        headline = f"[bold]{summary.total_cost:,.2f} {summary.currency}[/bold]"
-        console.print(Panel(headline, title=label))
-
-        service_table = Table(title="Top Services")
-        service_table.add_column("Service")
-        service_table.add_column("Cost", justify="right")
-        for name, amount in summary.by_service:
-            service_table.add_row(name, f"{amount:,.2f}")
-        console.print(service_table)
-
-        rg_table = Table(title="Top Resource Groups")
-        rg_table.add_column("Resource Group")
-        rg_table.add_column("Cost", justify="right")
-        for name, amount in summary.by_resource_group:
-            rg_table.add_row(name, f"{amount:,.2f}")
-        console.print(rg_table)
+    if rollup and len(summaries) > 1:
+        rollup_summary = cost.rollup_cost_summaries(summaries, top_n=top)
+        _print_cost_summary("All Subscriptions", rollup_summary)
+        summaries.append(rollup_summary)
 
     if output is not None and summaries:
         try:
