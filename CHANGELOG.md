@@ -20,8 +20,10 @@ Initial release.
 - `dashboard`: summary + trend + budgets in one command.
 - CSV / JSON / PDF export via repeatable `--output`, on all reporting commands.
 - CI: ruff (lint + format), mypy strict, pytest, and pip-audit on Linux and Windows across
-  Python 3.10-3.13.
+  Python 3.11-3.13.
 
 ### Security
+- Requires Python 3.11+: Python 3.10 is end-of-life, and the patched `pillow` (13.x, via
+  `reportlab`) and `filelock` releases no longer install on it, so `pip-audit` could not pass.
 - `cryptography>=50.0.0` pinned directly after `pip-audit` flagged a known CVE in the
   transitive version.

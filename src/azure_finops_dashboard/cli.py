@@ -1,6 +1,6 @@
 import dataclasses
 from collections.abc import Callable
-from datetime import date, datetime, time, timezone
+from datetime import UTC, date, datetime, time
 from pathlib import Path
 from typing import Any
 
@@ -203,8 +203,8 @@ def cost_summary(
             console.print("[red]Error:[/red] --start/--end must be in YYYY-MM-DD format.")
             raise typer.Exit(1) from None
         time_period = QueryTimePeriod(
-            from_property=datetime.combine(start_date, time.min, tzinfo=timezone.utc),
-            to=datetime.combine(end_date, time.max, tzinfo=timezone.utc),
+            from_property=datetime.combine(start_date, time.min, tzinfo=UTC),
+            to=datetime.combine(end_date, time.max, tzinfo=UTC),
         )
         query_timeframe = "Custom"
 

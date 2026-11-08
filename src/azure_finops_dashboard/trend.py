@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from datetime import date, datetime, time, timezone
+from datetime import UTC, date, datetime, time
 
 from azure.core.credentials import TokenCredential
 from azure.mgmt.costmanagement import CostManagementClient
@@ -67,8 +67,8 @@ def get_trend(credential: TokenCredential, subscription_id: str, months: int = 6
         type="ActualCost",
         timeframe="Custom",
         time_period=QueryTimePeriod(
-            from_property=datetime.combine(start, time.min, tzinfo=timezone.utc),
-            to=datetime.combine(today, time.max, tzinfo=timezone.utc),
+            from_property=datetime.combine(start, time.min, tzinfo=UTC),
+            to=datetime.combine(today, time.max, tzinfo=UTC),
         ),
         dataset=QueryDataset(
             granularity="Monthly",

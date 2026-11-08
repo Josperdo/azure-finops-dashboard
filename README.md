@@ -1,7 +1,7 @@
 # azure-finops-dashboard
 
 [![CI](https://github.com/Josperdo/azure-finops-dashboard/actions/workflows/ci.yml/badge.svg)](https://github.com/Josperdo/azure-finops-dashboard/actions/workflows/ci.yml)
-![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
+![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 A read-only Python CLI for Azure cost visibility and governance. Pulls spend across one or
@@ -28,7 +28,7 @@ rebuilt around Azure's model (one identity, many subscriptions).
 pip install git+https://github.com/Josperdo/azure-finops-dashboard.git
 ```
 
-Requires Python 3.10+ and an authenticated Azure identity (`az login` is the simplest).
+Requires Python 3.11+ and an authenticated Azure identity (`az login` is the simplest).
 
 ## Quick start
 
@@ -146,7 +146,7 @@ pytest
 Unit tests mock the Azure SDK clients; CI makes no live Azure calls. Cost aggregation,
 budget-breach logic, each audit detector, and export formats are tested against fixture
 data. CI also runs `ruff` (lint and format), `mypy --strict`, and `pip-audit` on Linux and
-Windows across Python 3.10-3.13. Live behavior was verified manually against a personal
+Windows across Python 3.11-3.13. Live behavior was verified manually against a personal
 subscription before each phase was considered done.
 
 ## Known limitations
