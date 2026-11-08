@@ -84,8 +84,7 @@ def rollup_cost_summaries(summaries: list[CostSummary], top_n: int = 10) -> Cost
     """Combine multiple subscriptions' summaries into one merged view."""
     all_tag_keys = {key for s in summaries for key in s.by_tag}
     merged_by_tag = {
-        key: _merge_pairs([s.by_tag.get(key, []) for s in summaries], top_n)
-        for key in all_tag_keys
+        key: _merge_pairs([s.by_tag.get(key, []) for s in summaries], top_n) for key in all_tag_keys
     }
 
     return CostSummary(

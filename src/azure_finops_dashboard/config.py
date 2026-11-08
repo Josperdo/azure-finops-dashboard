@@ -1,4 +1,5 @@
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -15,6 +16,19 @@ class ConfigError(Exception):
     pass
 
 
+_GUID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+
+
+def _validate_subscription_ids(ids: list[str], source: str) -> list[str]:
+    """User-supplied IDs end up in ARM scope paths, so require the GUID shape up front."""
+    for sub_id in ids:
+        if not _GUID_RE.match(sub_id):
+            raise ConfigError(f"Invalid subscription ID from {source}: expected a GUID.")
+    return ids
+
+
 def load_config(path: Path | None = None) -> Config:
     """Load default tenant/subscription scoping from a local JSON file.
 
@@ -25,7 +39,7 @@ def load_config(path: Path | None = None) -> Config:
         return Config()
 
     try:
-        raw = json.loads(config_path.read_text())
+        raw = json.loads(config_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise ConfigError(f"{config_path} is not valid JSON: {exc}") from exc
 
@@ -47,11 +61,11 @@ def resolve_subscriptions(
     subscription) > config file default > error.
     """
     if cli_ids:
-        return cli_ids
+        return _validate_subscription_ids(cli_ids, "--subscription")
     if all_flag:
         return discovered
     if config.subscription_ids:
-        return config.subscription_ids
+        return _validate_subscription_ids(config.subscription_ids, "the config file")
     raise ConfigError(
         "No subscription specified. Pass --subscription, use --all-subscriptions, "
         f"or set a default in {DEFAULT_CONFIG_PATH}."

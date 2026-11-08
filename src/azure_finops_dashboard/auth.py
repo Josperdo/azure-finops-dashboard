@@ -6,6 +6,6 @@ def get_credential() -> DefaultAzureCredential:
 
     Uses the standard DefaultAzureCredential chain (environment variables, managed
     identity, Azure CLI, then interactive browser). No key- or secret-based auth path
-    is supported — see Security.md.
+    is implemented by this tool — see the README's Authentication section.
     """
     return DefaultAzureCredential()

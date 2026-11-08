@@ -11,10 +11,15 @@ readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
 authors = [{ name = "John Sperry" }]
+keywords = ["azure", "finops", "cost-management", "cli", "rich", "cloud-governance"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Environment :: Console",
 ]
 dependencies = [
@@ -32,6 +37,11 @@ dependencies = [
     "typer>=0.12",
     "reportlab>=4.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Josperdo/azure-finops-dashboard"
+Issues = "https://github.com/Josperdo/azure-finops-dashboard/issues"
+Changelog = "https://github.com/Josperdo/azure-finops-dashboard/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 dev = [

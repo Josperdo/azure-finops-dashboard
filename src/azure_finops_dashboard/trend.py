@@ -56,9 +56,7 @@ def _month_range(start: date, end: date) -> list[str]:
     return months
 
 
-def get_trend(
-    credential: TokenCredential, subscription_id: str, months: int = 6
-) -> TrendSummary:
+def get_trend(credential: TokenCredential, subscription_id: str, months: int = 6) -> TrendSummary:
     """Fetch monthly spend for the last `months` calendar months (rolling, includes MTD)."""
     client = CostManagementClient(credential, **CLIENT_KWARGS)
     scope = f"/subscriptions/{subscription_id}"

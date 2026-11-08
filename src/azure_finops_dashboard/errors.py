@@ -8,7 +8,7 @@ def friendly_error(exc: Exception) -> str:
     if isinstance(exc, ClientAuthenticationError):
         return (
             "No valid Azure credential found. Run `az login`, or set up a managed "
-            "identity / environment-variable credential. See Security.md."
+            "identity / environment-variable credential. See the README's Authentication section."
         )
     if isinstance(exc, HttpResponseError) and exc.status_code == 403:
         return (
