@@ -9,8 +9,21 @@ more subscriptions, flags budget breaches, shows a six-month trend, and audits f
 ungoverned resources. Modeled on [aws-finops-dashboard](https://github.com/ravikiranvm/aws-finops-dashboard),
 rebuilt around Azure's model (one identity, many subscriptions).
 
-<!-- TODO: add screenshots here (redacted / throwaway subscription only):
-     docs/dashboard.png, docs/audit.png, docs/trend.png -->
+## Screenshots
+
+*Captured from a personal test subscription (low spend, a handful of resources).*
+
+**Cost summary, spend trend, and budget status** (`azure-finops dashboard`)
+
+![Dashboard: top services and resource groups, six-month trend, budget status](docs/azure-finops-dashboard-all.png)
+
+**Top services and resource groups** over a custom date range (`cost summary --start/--end`)
+
+![Top services and top resource groups](docs/azure-finops-topservices.png)
+
+**FinOps audit findings** (`azure-finops audit run`)
+
+![FinOps audit findings table with severity, type, resource group, and issue](docs/azure-finops-audit-findings.png)
 
 ## What it does
 
